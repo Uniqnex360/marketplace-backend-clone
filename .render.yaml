@@ -1,7 +1,0 @@
-services:
-  - type: web
-    name: MarketLink
-    env: python
-    pythonVersion: "3.11"  # <-- specify the version here
-    buildCommand: "pip install -r ecommerce_tool/requirements.txt"
-    startCommand: "gunicorn ecommerce_tool.wsgi:application"
