@@ -25,7 +25,7 @@ pymongo==4.10.1
 dnspython==2.6.1
 
 # Data and math
-numpy==1.24.4
+numpy==1.26.4
 pandas==2.0.3
 openpyxl==3.1.5
 et-xmlfile==2.0.0
