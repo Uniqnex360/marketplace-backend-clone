@@ -3,8 +3,6 @@ import requests
 import uuid
 import time 
 import xml.etree.ElementTree as ET  
-
-
 from omnisight.models import *
 import pandas as pd
 from ecommerce_tool.crud import DatabaseModel
@@ -37,10 +35,7 @@ from .helium_dashboard import sanitize_data
 from threading import Thread
 from queue import Queue
 from bson import ObjectId
-
 logger = logging.getLogger(__name__)
-
-
 def sanitize_floats(data):
     """Recursively replace NaN, inf, -inf with None"""
     if isinstance(data, dict):
@@ -53,7 +48,6 @@ def sanitize_floats(data):
         return round(data, 2)  
     else:
         return data
-
 def getMarketplaceList(request):
     pipeline = [
         {
@@ -80,12 +74,9 @@ def getMarketplaceList(request):
             }
         }
     ]
-
     marketplace_list = list(Marketplace.objects.aggregate(*pipeline))
     return marketplace_list
-
 @csrf_exempt
-
 def getProductList(request):
     # Get marketplace reference data
     marketplace_pipeline = [
@@ -98,10 +89,8 @@ def getProductList(request):
         }
     ]
     marketplace_list = list(Marketplace.objects.aggregate(*marketplace_pipeline))
-
     data = dict()
     json_request = JSONParser().parse(request)
-
     marketplace_id = json_request.get('marketplace_id')
     skip = int(json_request.get('skip', 0))
     limit = int(json_request.get('limit', 20))
@@ -110,11 +99,9 @@ def getProductList(request):
     brand_id_list = json_request.get('brand_id_list')
     sort_by = json_request.get('sort_by')
     sort_by_value = json_request.get('sort_by_value')
-
     pipeline = []
     count_pipeline = []
     match = {}
-
     # Filters
     if marketplace_id:
         match['marketplace_ids'] = {"$in": [ObjectId(marketplace_id)]}
@@ -128,12 +115,10 @@ def getProductList(request):
             {"product_title": {"$regex": search_query, "$options": "i"}},
             {"sku": {"$regex": search_query, "$options": "i"}},
         ]
-
     if match:
         match_stage = {"$match": match}
         pipeline.append(match_stage)
         count_pipeline.append(match_stage)
-
     # Projection
     pipeline.extend([
         {
@@ -169,13 +154,10 @@ def getProductList(request):
         {"$skip": skip},
         {"$limit": limit}
     ])
-
     if sort_by:
         pipeline.append({"$sort": {sort_by: int(sort_by_value)}})
-
     # Run query
     product_list = list(Product.objects.aggregate(*pipeline))
-
     # Attach marketplace names + logos
     for ins in product_list:
         marketplace_ids = ins.get('marketplace_ids', [])
@@ -185,18 +167,13 @@ def getProductList(request):
                 ins['marketplace_ins'].append(marketplace['name'])
                 ins['marketplace_image_url'].append(marketplace['image_url'])
         del ins['marketplace_ids']
-
     # Count pipeline
     count_pipeline.extend([{"$count": "total_count"}])
     total_count_result = list(Product.objects.aggregate(*count_pipeline))
     total_count = total_count_result[0]['total_count'] if total_count_result else 0
-
     data['total_count'] = total_count
     data['product_list'] = product_list
     return data
-
-
-
 def getProductCategoryList(request):
     data = dict()
     marketplace_id = request.GET.get('marketplace_id')
@@ -233,9 +210,6 @@ def getProductCategoryList(request):
     category_list = list(Category.objects.aggregate(*(pipeline)))
     data['category_list'] = category_list
     return data
-
-
-
 def getBrandList(request):
     data = dict()
     marketplace_id = request.GET.get('marketplace_id')
@@ -268,8 +242,6 @@ def getBrandList(request):
     brand_list = list(Brand.objects.aggregate(*(pipeline)))
     data['brand_list'] = brand_list
     return data
-
-
 def fetchProductDetails(request):
     data = dict()
     product_id = request.GET.get('product_id')
@@ -347,9 +319,6 @@ def fetchProductDetails(request):
     if len(product_details):
         data = product_details[0]
     return data
-
-
-
 def getOrdersBasedOnProduct(request):
     data = {'total_count': 0, 'orders': []}
     product_id = request.GET.get('product_id')
@@ -357,35 +326,20 @@ def getOrdersBasedOnProduct(request):
     limit = int(request.GET.get('limit', 10))
     sort_by = request.GET.get('sort_by')
     sort_by_value = int(request.GET.get('sort_by_value', -1)) 
-
-    
     matching_order_items = list(OrderItems.objects.filter(ProductDetails__product_id=ObjectId(product_id)).only('id'))
-
     if not matching_order_items:
         return data
-
-    
     total_count = Order.objects.filter(order_items__in=matching_order_items).count()
-
-    
     sort_field = sort_by if sort_by else "order_date"
     sort_order = sort_by_value if sort_by_value else -1
-    
-
     orders_queryset = Order.objects.filter(order_items__in=matching_order_items)\
             .order_by(f"{sort_order}{sort_field}")\
             .skip(skip).limit(limit - skip)
-   
-    
-
-    
     order_list = list(orders_queryset)
     marketplace_ids = [o.marketplace_id.id for o in order_list if o.marketplace_id]
     marketplaces = {
         m.id: m.name for m in Marketplace.objects.filter(id__in=marketplace_ids)
     }
-
-    
     orders = []
     for o in order_list:
         orders.append({
@@ -397,12 +351,9 @@ def getOrdersBasedOnProduct(request):
             "currency": o.currency,
             "marketplace_name": marketplaces.get(o.marketplace_id.id, None),
         })
-
-    
     custom_orders = list(custom_order.objects.filter(
         ordered_products__product_id =  ObjectId(product_id)
     ).only("order_id", "purchase_order_date", "order_status", "total_price", "currency"))
-
     for c in custom_orders:
         orders.append({
             "id": str(c.id),
@@ -418,20 +369,12 @@ def getOrdersBasedOnProduct(request):
         "orders": orders
     }
     return data
-
-
-
-
-
-
-
 @csrf_exempt
 @api_view(["POST"])
 def fetchAllorders(request):
     data = dict()
     pipeline = []
     count_pipeline = []
-
     json_request = request.data
     user_id = json_request.get('user_id')
     limit = int(json_request.get('limit', 100)) 
@@ -441,25 +384,21 @@ def fetchAllorders(request):
     sort_by_value = json_request.get('sort_by_value')
     search_query = json_request.get('search_query')
     order_status_filter = json_request.get('order_status') 
-
     if search_query and search_query.strip():
         skip=0
         if not limit or limit>100:
             limit=25
     pacific_tz = pytz.timezone("US/Pacific")
     current_time_pacific = datetime.now(pacific_tz)
-
     if market_place_id == "custom":
+        # Custom orders logic remains the same
         base_pipeline = []
         if search_query and search_query.strip():
             safe_search = re.escape(search_query.strip())
             base_pipeline.append({"$match": {"order_id": {"$regex": safe_search, "$options": "i"}}})
-        
-
         count_pipeline = base_pipeline + [{"$count": "total_count"}]
         total_count_result = list(custom_order.objects.aggregate(*count_pipeline))
         total_count = total_count_result[0]['total_count'] if total_count_result else 0
-
         pipeline = base_pipeline + [
             {"$project": {
                 "_id": 0, "id": {"$toString": "$_id"}, "order_id": {"$ifNull": ["$order_id", ""]},
@@ -469,78 +408,118 @@ def fetchAllorders(request):
                 "order_status" : "$order_status", "currency" : {"$ifNull" : ["$currency","USD"]}
             }}
         ]
-        
         if sort_by:
             pipeline.append({"$sort": {sort_by: int(sort_by_value)}})
         else:
             pipeline.append({"$sort": {"id": -1}})
-        
         pipeline.extend([{"$skip": skip}, {"$limit": limit}])
-
-        
         data['manual_orders'] = list(custom_order.objects.aggregate(*pipeline))
         data['total_count'] = total_count
         data['status'] = "custom"
-
     else:
+        # Regular orders with flexible marketplace lookup
         if market_place_id and market_place_id != 'all':
-            pipeline.append({"$match": {"marketplace_id": ObjectId(market_place_id)}})
-    
+            try:
+                pipeline.append({"$match": {"marketplace_id": ObjectId(market_place_id)}})
+            except Exception as e:
+                # If ObjectId conversion fails, try matching as string
+                pipeline.append({"$match": {"marketplace_id": market_place_id}})
         if search_query and search_query.strip():
             safe_search = re.escape(search_query.strip())
             pipeline.append({"$match": {"purchase_order_id": {"$regex": safe_search, "$options": "i"}}})
-        
         if order_status_filter and order_status_filter != 'all':
             pipeline.append({"$match": {"order_status": order_status_filter}})
-        
         count_pipeline = pipeline + [{"$count": "total_count"}]
         total_count_result = list(Order.objects.aggregate(*count_pipeline))
         total_count = total_count_result[0]['total_count'] if total_count_result else 0
-
         if sort_by:
             pipeline.append({"$sort": {sort_by: int(sort_by_value)}})
         else:
             pipeline.append({"$sort": {"order_date": -1}})
-        
+        # FLEXIBLE LOOKUP - Handle both string and ObjectId marketplace_id
         pipeline.extend([
             {"$skip": skip}, {"$limit": limit},
-            {"$lookup": {"from": "marketplace", "localField": "marketplace_id", "foreignField": "_id", "as": "marketplace_ins"}},
-            {"$unwind": "$marketplace_ins"},
+            # First, try to add a field that converts marketplace_id to ObjectId if it's a string
+            {"$addFields": {
+                "marketplace_id_as_objectid": {
+                    "$cond": {
+                        "if": {"$eq": [{"$type": "$marketplace_id"}, "string"]},
+                        "then": {"$toObjectId": "$marketplace_id"},
+                        "else": "$marketplace_id"
+                    }
+                }
+            }},
+            # Try lookup with ObjectId first
+            {"$lookup": {
+                "from": "marketplace",
+                "localField": "marketplace_id_as_objectid",
+                "foreignField": "_id",
+                "as": "marketplace_ins_objectid"
+            }},
+            # Try lookup with string
+            {"$lookup": {
+                "from": "marketplace",
+                "localField": "marketplace_id",
+                "foreignField": "id",  # Assuming marketplace has string id field
+                "as": "marketplace_ins_string"
+            }},
+            # Merge the results - use whichever lookup found a match
+            {"$addFields": {
+                "marketplace_ins": {
+                    "$cond": {
+                        "if": {"$gt": [{"$size": "$marketplace_ins_objectid"}, 0]},
+                        "then": "$marketplace_ins_objectid",
+                        "else": "$marketplace_ins_string"
+                    }
+                }
+            }},
+            {"$unwind": {"path": "$marketplace_ins", "preserveNullAndEmptyArrays": True}},
             {"$project": {
                 "_id": 0, "id": {"$toString": "$_id"}, "purchase_order_id": 1,
                 "order_date": 1, "order_status": 1, "order_total": 1, "currency": 1,
-                "marketplace_name": "$marketplace_ins.name", "items_order_quantity": 1
+                "marketplace_name": {"$ifNull": ["$marketplace_ins.name", "Unknown"]}, 
+                "items_order_quantity": 1
             }}
         ])
-        
-        orders = list(Order.objects.aggregate(*(pipeline)))
-
+        orders = list(Order.objects.aggregate(*pipeline))
+        # Process timezone conversion
+        processed_orders = []
         for order in orders:
-            if order.get('order_date'):
-                order_date_utc = order['order_date'].astimezone(pytz.utc) 
-                order['order_date'] = order_date_utc.astimezone(pacific_tz)  
-        orders = [o for o in orders if o.get('order_date') and o['order_date'] <= current_time_pacific]
-        
-        data['orders'] = orders
+            try:
+                if order.get('order_date'):
+                    order_date = order['order_date']
+                    if order_date.tzinfo is None:
+                        order_date = pytz.utc.localize(order_date)
+                    order['order_date'] = order_date.astimezone(pacific_tz)
+                    future_threshold = current_time_pacific + timedelta(hours=24)
+                    if order['order_date'] <= future_threshold:
+                        processed_orders.append(order)
+                else:
+                    processed_orders.append(order)
+            except Exception as e:
+                processed_orders.append(order)
+        data['orders'] = processed_orders
         data['total_count'] = total_count
         data['status'] = ""
-
     marketplace_pipeline = [{"$project" : {"_id" : 0, "id" : {"$toString" : "$_id"}, "name" : 1, "image_url" : 1}}]
     data['marketplace_list'] = list(Marketplace.objects.aggregate(*marketplace_pipeline))
-    
     return Response(data)
 
 def fetchOrderDetails(request):
     data = {}
     user_id = request.GET.get('user_id')
     order_id = request.GET.get('order_id')
-
     pipeline = [
         {
             "$match": {
                 "_id": ObjectId(order_id)
             }
         },
+        {
+    "$addFields": {
+        "marketplace_obj_id": {"$toObjectId": "$marketplace_id"}
+    }
+},
         {
             "$lookup": {
                 "from": "marketplace",
@@ -618,48 +597,13 @@ def fetchOrderDetails(request):
     order_number = None
     merchant_shipment_cost=0
     order_details = list(Order.objects.aggregate(*pipeline))
-
     if order_details:
-        
         data = order_details[0]
         fulfillment_channel = data.get("fulfillment_channel", "")
         merchant_shipment_cost=data.get('merchant_shipment_cost',0)
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-                
-        
-        
-            
-        
-        
-        
-        
-        
-        
-        
-        
-        
-                        
         order_items_ids = data.get("order_items", [])
         if order_items_ids:
             order_items = DatabaseModel.list_documents(OrderItems.objects,{"id__in" : order_items_ids})
-            
             serialized_items = []
             for item in order_items:
                 serialized_item = {
@@ -692,16 +636,10 @@ def fetchOrderDetails(request):
                     "IsGift": item.IsGift
                 }
                 serialized_items.append(serialized_item)
-            
             data["order_items"] = serialized_items
         else:
             data["order_items"] = []
-
     return data
-
-
-
-
 @csrf_exempt
 def getProductListForOrdercreation(request):
     data = dict()
@@ -746,12 +684,8 @@ def getProductListForOrdercreation(request):
     ])
     total_count_result = list(Product.objects.aggregate(*(count_pipeline)))
     total_count = total_count_result[0]['total_count'] if total_count_result else 0
-
     data['total_count'] = total_count
-    
     return product_list
-
-
 @csrf_exempt
 def createManualOrder(request):
     data = dict()
@@ -762,26 +696,19 @@ def createManualOrder(request):
     user_id = json_request.get('user_id')
     if user_id:
         custom_product_obj['user_id'] = ObjectId(user_id)
-    
     custom_product_obj['order_id'] = str(''.join([str(uuid.uuid4().int)[:13]]))
-     
     custom_product_obj['customer_order_id'] = datetime.now().strftime('%Y%m%d') + str(uuid.uuid4().int)[:5]
-    
     try:
         custom_product_obj['purchase_order_date'] = datetime.strptime(
             json_request.get(custom_product_obj['purchase_order_date']), '%Y-%m-%d'
         )
     except:
         pass
-    
     expected_delivery_date = custom_product_obj.get('expected_delivery_date')
     if expected_delivery_date:
         custom_product_obj['expected_delivery_date'] = datetime.strptime(expected_delivery_date, '%Y-%m-%d')
     else:
         custom_product_obj['expected_delivery_date'] = None
-  
-
-    
     for ins in ordered_products:
         product_detail_dict = product_details(
             product_id=ObjectId(ins.get('product_id')),
@@ -792,31 +719,22 @@ def createManualOrder(request):
             quantity_price=float(ins.get('quantity_price', 0))
         )
         product_detail.append(product_detail_dict)
-
     custom_product_obj['ordered_products'] = product_detail
-
-    
     total_price = float(custom_product_obj.get('total_price', 0))
     discount = float(custom_product_obj.get('discount', 0))  
     tax = float(custom_product_obj.get('tax', 0))  
     shipment_cost = float(custom_product_obj.get('shipment_cost', 0))
-
-
     if discount > 0:
         custom_product_obj['discount_amount'] = (total_price * discount / 100)  
         total_price -= custom_product_obj['discount_amount']
     if tax > 0:
         custom_product_obj['tax_amount'] = (total_price * tax / 100)  
         total_price += custom_product_obj['tax_amount']
-
     custom_product_obj['total_price'] = round(total_price + shipment_cost, 2)  
-
-    
     manual_order = DatabaseModel.save_documents(custom_order, custom_product_obj)
     data['message'] = "Manual order created successfully."
     data['order_id'] = str(manual_order.id)
     return data
-
 @csrf_exempt
 def listManualOrders(request):
     data = dict()
@@ -835,7 +753,6 @@ def listManualOrders(request):
                 "shipping_address": {"$ifNull": ["$shipping_address", ""]},
                 "total_quantity": {"$ifNull": ["$total_quantity", 0]},
                 "total_price": {"$ifNull": [{"$round": ["$total_price", 0.0]}, 0.0]},
-                
                 "purchase_order_date": {"$ifNull": ["$purchase_order_date", None]},
                 "expected_delivery_date": {"$ifNull": ["$expected_delivery_date", None]},
             }
@@ -854,7 +771,6 @@ def listManualOrders(request):
             }
         }
         pipeline.append(sort)
-
     manual_orders = list(custom_order.objects.aggregate(*pipeline))
     count_pipeline = [
         {
@@ -866,7 +782,6 @@ def listManualOrders(request):
     data['total_count'] = total_count
     data['manual_orders'] = manual_orders
     return data
-
 @csrf_exempt
 def updateManualOrder(request):
     data = dict()
@@ -874,23 +789,17 @@ def updateManualOrder(request):
     order_id = json_request.get('order_id')
     ordered_products = json_request.get('ordered_products',[])
     custom_product_obj = json_request.get('custom_product_obj')
-
-    
-  
     try:
         purchase_order_date = custom_product_obj.get('purchase_order_date')
         if purchase_order_date:
             custom_product_obj['purchase_order_date'] = datetime.strptime(purchase_order_date, '%Y-%m-%d')
     except:
         pass
-
     expected_delivery_date = custom_product_obj.get('expected_delivery_date')
     if expected_delivery_date:
         custom_product_obj['expected_delivery_date'] = datetime.strptime(expected_delivery_date, '%Y-%m-%d')
     else:
         custom_product_obj['expected_delivery_date'] = None
-
-    
     product_detail = []
     for ins in ordered_products:
         product_detail_dict = product_details(
@@ -902,31 +811,21 @@ def updateManualOrder(request):
             quantity_price=float(ins.get('quantity_price', 0))
         )
         product_detail.append(product_detail_dict)
-
     custom_product_obj['ordered_products'] = product_detail
-
-    
     total_price = float(custom_product_obj.get('total_price', 0))
     discount = float(custom_product_obj.get('discount', 0))  
     tax = float(custom_product_obj.get('tax', 0))  
     shipment_cost = float(custom_product_obj.get('shipment_cost', 0))
-
     if discount > 0:
         custom_product_obj['discount_amount'] = (total_price * discount / 100)  
         total_price -= custom_product_obj['discount_amount']
     if tax > 0:
         custom_product_obj['tax_amount'] = (total_price * tax / 100)  
         total_price += custom_product_obj['tax_amount']
-
     custom_product_obj['total_price'] = round(total_price + shipment_cost, 2)  
-
-    
     DatabaseModel.update_documents(custom_order.objects,{"id" : order_id},custom_product_obj)
-
     data['message'] = "Manual order updated successfully."
     return data
-
-
 def fetchManualOrderDetails(request):
     data = dict()
     order_id = request.GET.get('order_id')
@@ -1027,71 +926,54 @@ def fetchManualOrderDetails(request):
     else:
         data['error'] = "Manual order not found."
     return data
-
-
-
 def ordersCountForDashboard(request):
     from django.utils.timezone import now
     from queue import Queue
     from threading import Thread
     from bson import ObjectId
-
     data = dict()
     marketplace_id = request.GET.get('marketplace_id')
     start_date = request.GET.get('start_date')
     end_date = request.GET.get('end_date')
     preset = request.GET.get("preset", "Today")
-    
-    
     brand_ids = []
-    
     array_brand_ids = request.GET.getlist('brand_id[]')
     if array_brand_ids:
         brand_ids.extend(array_brand_ids)
-    
     single_brand_id = request.GET.get('brand_id')
     if single_brand_id and single_brand_id not in brand_ids:
         brand_ids.append(single_brand_id)
-    
     product_ids = request.GET.getlist('product_id[]')
     product_id = request.GET.get('product_id', None)
-    
     if product_ids:
         product_ids = [ObjectId(pid) for pid in product_ids]
     elif product_id:
         product_ids = [ObjectId(product_id)]
     else:
         product_ids = None
-        
     timezone_str = "US/Pacific"
-
     if start_date:
         start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
     else:
         start_date, end_date = get_date_range(preset, timezone_str)
-
     if timezone_str != 'UTC':
         start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
-
     match_conditions = {
         "order_date": {"$gte": start_date, "$lte": end_date},
         "order_status": {"$nin": ["Canceled", "Cancelled"]},
         "order_total": {"$gt": 0}
     }
-    
     custom_match_conditions = {
         "purchase_order_date": {"$gte": start_date, "$lte": end_date},
         "order_status": {"$nin": ["Canceled", "Cancelled"]},
         "total_price": {"$gt": 0}
     }
-
     if brand_ids:
         try:
             brand_object_ids = [ObjectId(bid) for bid in brand_ids if bid]
             if brand_object_ids:
                 products = list(Product.objects.filter(brand_id__in=brand_object_ids).only('id'))
                 product_ids_from_brands = [p.id for p in products]
-                
                 if product_ids_from_brands:
                     if product_ids:
                         product_ids = [pid for pid in product_ids if pid in product_ids_from_brands]
@@ -1105,10 +987,8 @@ def ordersCountForDashboard(request):
                     custom_match_conditions["_id"] = None
         except Exception as e:
             print(f"Error processing brand filters: {str(e)}")
-
     def build_pipeline_with_product_filter(base_match_conditions):
         pipeline = [{"$match": base_match_conditions}]
-        
         if product_ids:
             pipeline.extend([
                 {
@@ -1135,12 +1015,9 @@ def ordersCountForDashboard(request):
                     }
                 }
             ])
-        
         return pipeline
-
     order_count, custom_order_count = 0, 0
     order_value, custom_order_value = 0, 0
-    
     def count_orders(q):
         pipeline = build_pipeline_with_product_filter(match_conditions)
         pipeline.append({
@@ -1156,16 +1033,13 @@ def ordersCountForDashboard(request):
                 "order_value": {"$sum": "$order_total"}
             }
         })
-        
         res = list(Order.objects.aggregate(*pipeline))
         if res:
             q.put((res[0].get("count", 0), res[0].get("order_value", 0)))
         else:
             q.put((0, 0))
-
     def count_custom_orders(q):
         custom_match = custom_match_conditions.copy()
-        
         if product_ids:
             pipeline = [
                 {"$match": custom_match},
@@ -1200,43 +1074,34 @@ def ordersCountForDashboard(request):
                     }
                 }
             ]
-        
         res = list(custom_order.objects.aggregate(*pipeline))
         if res:
             q.put((res[0].get("count", 0), res[0].get("order_value", 0)))
         else:
             q.put((0, 0))
-
     q1, q2 = Queue(), Queue()
     t1 = Thread(target=count_orders, args=(q1,))
     t2 = Thread(target=count_custom_orders, args=(q2,))
     t1.start(); t2.start()
     t1.join(); t2.join()
-    
     order_result = q1.get()
     custom_result = q2.get()
-    
     order_count, order_value = order_result
     custom_order_count, custom_order_value = custom_result
-    
     total_order_count = order_count + custom_order_count
     total_order_value = round(order_value + custom_order_value, 2)
-
     data['total_order_count'] = {
         "value": total_order_count,
         "percentage": "100.0%",
         "order_value": total_order_value
     }
-
     if marketplace_id == "all":
         marketplaces = list(Marketplace.objects.only('id', 'name'))
         results = {}
         threads = []
-
         def process_marketplace(mp):
             mp_match_conditions = match_conditions.copy()
             mp_match_conditions["marketplace_id"] = mp.id
-            
             pipeline = build_pipeline_with_product_filter(mp_match_conditions)
             pipeline.append({
                 "$group": {
@@ -1251,33 +1116,26 @@ def ordersCountForDashboard(request):
                     "order_value": {"$sum": "$order_total"}
                 }
             })
-            
             res = list(Order.objects.aggregate(*pipeline))
             count = res[0].get("count", 0) if res else 0
             order_value = round(res[0].get("order_value", 0), 2) if res else 0
             percentage = round((count / total_order_count) * 100, 2) if total_order_count else 0
-            
             results[mp.name] = {
                 "count": count,
                 "percentage": f"{percentage}%",
                 "order_value": order_value
             }
-
         for mp in marketplaces:
             thread = Thread(target=process_marketplace, args=(mp,))
             thread.start()
             threads.append(thread)
-
         for thread in threads:
             thread.join()
-
         data.update(results)
-
     elif marketplace_id != "all" and marketplace_id != "custom":
         mp_id = ObjectId(marketplace_id)
         mp_match_conditions = match_conditions.copy()
         mp_match_conditions["marketplace_id"] = mp_id
-        
         pipeline = build_pipeline_with_product_filter(mp_match_conditions)
         pipeline.append({
             "$group": {
@@ -1292,12 +1150,10 @@ def ordersCountForDashboard(request):
                 "order_value": {"$sum": "$order_total"}
             }
         })
-        
         res = list(Order.objects.aggregate(*pipeline))
         count = res[0].get("count", 0) if res else 0
         order_value = round(res[0].get("order_value", 0), 2) if res else 0
         name = DatabaseModel.get_document(Marketplace.objects, {"id": marketplace_id}, ['name']).name
-
         data[name] = {
             "value": count,
             "percentage": "100.0%",
@@ -1308,10 +1164,8 @@ def ordersCountForDashboard(request):
             "percentage": "100.0%",
             "order_value": order_value
         }
-
     elif marketplace_id == "custom":
         custom_match = custom_match_conditions.copy()
-        
         if product_ids:
             pipeline = [
                 {"$match": custom_match},
@@ -1346,7 +1200,6 @@ def ordersCountForDashboard(request):
                     }
                 }
             ]
-        
         res = list(custom_order.objects.aggregate(*pipeline))
         count = res[0].get("count", 0) if res else 0
         order_value = round(res[0].get("order_value", 0), 2) if res else 0
@@ -1360,9 +1213,7 @@ def ordersCountForDashboard(request):
             "percentage": "100.0%",
             "order_value": order_value
         }
-
     return sanitize_data(data)
-
 def totalSalesAmount(request):
     import json
     data = dict()
@@ -1375,8 +1226,6 @@ def totalSalesAmount(request):
     product_id = request.GET.get("product_id")
     manufacturer_name = request.GET.get("manufacturer_name")
     fulfillment_channel = request.GET.get("fulfillment_channel")
-
-    
     if product_id:
         try:
             product_id = json.loads(product_id)
@@ -1392,17 +1241,12 @@ def totalSalesAmount(request):
             manufacturer_name = json.loads(manufacturer_name)
         except Exception:
             manufacturer_name = [manufacturer_name]
-
-    
     if start_date:
         start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
     else:
         start_date, end_date = get_date_range(preset, timezone_str)
-
     if timezone_str != 'UTC':
         start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
-
-    
     orders = grossRevenue(
         start_date, end_date,
         marketplace_id=marketplace_id,
@@ -1414,16 +1258,12 @@ def totalSalesAmount(request):
     )
     total_sales = sum(order['order_total'] for order in orders)
     data['total_sales'] = round(total_sales, 2)
-
     return data
-
 @csrf_exempt
 def salesAnalytics(request):
     try:
         data = dict()
         json_request = JSONParser().parse(request)
-        
-        
         marketplace_id = json_request.get('marketplace_id', 'all')  
         start_date = json_request.get('start_date')  
         end_date = json_request.get('end_date')  
@@ -1431,9 +1271,6 @@ def salesAnalytics(request):
         brand_id_list = json_request.get('brand_id')
         preset = json_request.get("preset", "Today")     
         product_id_list = json_request.get('product_id')
-   
-
-        
         if start_date and start_date != "":
             if isinstance(start_date, datetime):
                 start_date = start_date.isoformat()
@@ -1442,8 +1279,6 @@ def salesAnalytics(request):
             start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
         else:
             start_date, end_date = get_date_range(preset, timezone_str)
-
-        
         orders = grossRevenue(
             start_date, end_date, 
             marketplace_id=marketplace_id, 
@@ -1451,18 +1286,11 @@ def salesAnalytics(request):
             timezone=timezone_str,
             product_id=product_id_list
         )
-
-        
         orders = [o for o in orders if o.get('order_status') not in ['Cancelled','Canceled'] and o.get('order_total', 0) > 0]
-
-        
         data['total_sales'] = sum(o['order_total'] for o in orders)
-
-        
         from collections import defaultdict
         order_days = defaultdict(lambda: {'order_count': 0, 'order_value': 0.0})
         for o in orders:
-            
             order_date = o['order_date']
             if isinstance(order_date, str):
                 order_date = datetime.fromisoformat(order_date)
@@ -1473,13 +1301,10 @@ def salesAnalytics(request):
             {'date': k, 'order_count': v['order_count'], 'order_value': v['order_value']}
             for k, v in sorted(order_days.items())
         ]
-
         sanitized_data = sanitize_floats(data)
         return sanitized_data
-
     except Exception as e:
         return {"error": str(e)}
-    
 @csrf_exempt
 def mostSellingProducts(request):
     data = dict()
@@ -1487,15 +1312,11 @@ def mostSellingProducts(request):
     marketPlaceId = request.GET.get('marketPlaceId')
     start_date = request.GET.get('start_date')  
     end_date = request.GET.get('end_date')  
-
-    
     match_conditions = {}
     if start_date and end_date:
         start_date = datetime.strptime(start_date, '%Y-%m-%d')
         end_date = datetime.strptime(end_date, '%Y-%m-%d')
         match_conditions["order_data.order_date"] = {"$gte": start_date, "$lte": end_date}
-
-    
     pipeline.extend([
         {
             "$lookup": {
@@ -1534,7 +1355,6 @@ def mostSellingProducts(request):
             "$unwind": "$marketplace_ins"
         },
     ])
-
     if marketPlaceId and marketPlaceId != "all" and marketPlaceId != "custom":
         match = {
             "$match": {
@@ -1542,7 +1362,6 @@ def mostSellingProducts(request):
             }
         }
         pipeline.append(match)
-
     pipeline2 = [
         {
             "$group": {
@@ -1580,12 +1399,9 @@ def mostSellingProducts(request):
     ]
     pipeline.extend(pipeline2)
     top_products = list(OrderItems.objects.aggregate(*pipeline))
-
-    
     custom_match_conditions = {}
     if start_date and end_date:
         custom_match_conditions["purchase_order_date"] = {"$gte": start_date, "$lte": end_date}
-
     custom_pipeline = [
         {
             "$match": custom_match_conditions
@@ -1647,17 +1463,13 @@ def mostSellingProducts(request):
     if marketPlaceId == "all":
         top_products.extend(custom_top_products)
         top_products = sorted(top_products, key=lambda x: x['sales_count'], reverse=True)[:7]
-
     data['top_products'] = top_products
     return data
-
 def change_sign(value):
     """
     Change the sign of a given value only if it's negative.
-    
     Args:
     value (number): The input value to potentially change the sign of.
-    
     Returns:
     number: The input value with its sign changed if it was negative, otherwise unchanged.
     """
@@ -1665,8 +1477,6 @@ def change_sign(value):
         return -value
     else:
         return value
-    
-    
 @csrf_exempt
 def getSalesTrendPercentage(request):
     import pytz
@@ -1674,25 +1484,17 @@ def getSalesTrendPercentage(request):
     from datetime import datetime, timedelta
     from rest_framework.parsers import JSONParser
     from bson import ObjectId
-
     data = dict()
     json_request = JSONParser().parse(request)
     range_type = json_request.get('range_type', 'month')  
     marketplace_id = json_request.get('marketplace_id')  
     timezone_str = json_request.get('timezone', 'US/Pacific')
-    
-    
     local_tz = timezone(timezone_str)
     now = datetime.now(local_tz)
-    
-    
     if now.tzinfo is None:
         now = local_tz.localize(now)
-    
     now = now.astimezone(pytz.UTC)
     now = now.replace(tzinfo=None)
-
-    
     if range_type == 'day':
         current_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         previous_start = current_start - timedelta(days=1)
@@ -1714,8 +1516,6 @@ def getSalesTrendPercentage(request):
     else:
         data['error'] = "Invalid range_type provided."
         return data
-
-    
     match_pipeline = [
         {
             "$facet": {
@@ -1756,7 +1556,6 @@ def getSalesTrendPercentage(request):
             }
         }
     ]
-
     custom_match_pipeline = [
         {
             "$facet": {
@@ -1795,23 +1594,18 @@ def getSalesTrendPercentage(request):
             }
         }
     ]
-
     if marketplace_id == "custom":
         trend_data = list(custom_order.objects.aggregate(*custom_match_pipeline))
     else:
         trend_data = list(Order.objects.aggregate(*match_pipeline))
         custom_trend_data = list(custom_order.objects.aggregate(*custom_match_pipeline))
-
-        
         if custom_trend_data:
             for key in ["current_range", "previous_range"]:
                 for item in custom_trend_data[0][key]:
                     trend_data[0][key].append({"_id": "custom", "sales_value": item["sales_value"]})
-
     if trend_data:
         current_range_data = {item["_id"]: sanitize_data(item["sales_value"]) for item in trend_data[0]["current_range"]}
         previous_range_data = {item["_id"]: sanitize_data(item["sales_value"]) for item in trend_data[0]["previous_range"]}
-
         if marketplace_id == "all":  
             current_total = sum(current_range_data.values())
             previous_total = sum(previous_range_data.values())
@@ -1854,28 +1648,21 @@ def getSalesTrendPercentage(request):
             data['trend_percentage'] = trend_percentage
     else:
         data['trend_percentage'] = []
-
     return data
-
-
 @csrf_exempt
 def fetchSalesSummary(request):
     data = {}
     total_sales_pipeline = []
     pipeline = []
     match = {}
-
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id')
     start_date = json_request.get('start_date')  
     end_date = json_request.get('end_date')  
-
-    
     if start_date and end_date:
         start_date = datetime.strptime(start_date, '%Y-%m-%d')
         end_date = datetime.strptime(end_date, '%Y-%m-%d')
         match["order_date"] = {"$gte": start_date, "$lte": end_date}
-
     if marketplace_id != None and marketplace_id != "all" and marketplace_id != "" and marketplace_id != "custom":
         match["marketplace_id"] = ObjectId(marketplace_id)
     if marketplace_id == "all" or marketplace_id != "custom":
@@ -1883,8 +1670,6 @@ def fetchSalesSummary(request):
             match_stage = {"$match": match}
             total_sales_pipeline.append(match_stage)
             pipeline.append(match_stage)
-
-        
         total_sales_pipeline.extend([
             {
                 "$group": {
@@ -1899,13 +1684,11 @@ def fetchSalesSummary(request):
                 }
             }
         ])
-
         summary = list(Order.objects.aggregate(*total_sales_pipeline))
         if summary:
             data['total_sales'] = summary[0].get('total_sales', 0)
         else:
             data['total_sales'] = 0
-
         pipeline.extend([
             {
                 "$unwind": "$order_items"  
@@ -1951,12 +1734,9 @@ def fetchSalesSummary(request):
         else:
             data['total_units_sold'] = 0
             data['total_sold_product_count'] = 0
-
-    
     custom_match = {}
     if start_date and end_date:
         custom_match["purchase_order_date"] = {"$gte": start_date, "$lte": end_date}
-
     custom_pipeline = [
         {"$match": custom_match},
         {"$unwind": "$ordered_products"},
@@ -1977,7 +1757,6 @@ def fetchSalesSummary(request):
             }
         }
     ]
-
     custom_summary = list(custom_order.objects.aggregate(*custom_pipeline))
     if custom_summary:
         total_custom_sales = custom_summary[0].get('total_custom_sales', 0)
@@ -1987,20 +1766,15 @@ def fetchSalesSummary(request):
         total_custom_sales = 0
         total_custom_units_sold = 0
         total_custom_sold_product_count = 0
-
     if marketplace_id == "custom":
         data['total_sales'] = total_custom_sales
         data['total_units_sold'] = total_custom_units_sold
         data['total_sold_product_count'] = total_custom_sold_product_count
-
     if marketplace_id == "": 
-        
         data['total_sales'] += total_custom_sales
         data['total_units_sold'] += total_custom_units_sold
         data['total_sold_product_count'] += total_custom_sold_product_count
-
     return data
-
 @csrf_exempt
 def fetchTopSellingCategories(request):
     data = dict()
@@ -2009,8 +1783,6 @@ def fetchTopSellingCategories(request):
     limit = int(json_request.get('limit', 15))  
     start_date = json_request.get('start_date')  
     end_date = json_request.get('end_date')  
-
-    
     match_conditions = {}
     if start_date and end_date:
         start_date = datetime.strptime(start_date, '%Y-%m-%d')
@@ -2018,9 +1790,7 @@ def fetchTopSellingCategories(request):
         match_conditions["order_data.order_date"] = {"$gte": start_date, "$lte": end_date}
     if marketplace_id != None and marketplace_id != "all" and marketplace_id != "custom":
         match_conditions["order_data.marketplace_id"] = ObjectId(marketplace_id)
-
     if marketplace_id != "custom":
-        
         pipeline = [
             {
                 "$lookup": {
@@ -2082,14 +1852,10 @@ def fetchTopSellingCategories(request):
                 "$limit": limit
             }
         ]
-
         top_categories = list(OrderItems.objects.aggregate(*pipeline))
-
-    
     custom_match_conditions = {}
     if start_date and end_date:
         custom_match_conditions["purchase_order_date"] = {"$gte": start_date, "$lte": end_date}
-
     custom_pipeline = [
         {"$match": custom_match_conditions},
         {"$unwind": "$ordered_products"},
@@ -2139,12 +1905,10 @@ def fetchTopSellingCategories(request):
             "$limit": limit
         }
     ]
-
     custom_top_categories = list(custom_order.objects.aggregate(*custom_pipeline))
     if marketplace_id == "custom":
         data['top_categories'] = custom_top_categories
     else:
-        
         combined_categories = {}
         for category in top_categories + custom_top_categories:
             category_id = category["category_id"]
@@ -2152,14 +1916,9 @@ def fetchTopSellingCategories(request):
                 combined_categories[category_id]["total_order_value"] += category["total_order_value"]
             else:
                 combined_categories[category_id] = category
-
         sorted_categories = sorted(combined_categories.values(), key=lambda x: x["total_order_value"], reverse=True)[:limit]
-
         data['top_categories'] = sorted_categories
     return data
-
-
-
 @csrf_exempt
 def createUser(request):
     data = dict()
@@ -2174,7 +1933,6 @@ def createUser(request):
             "password": json_request.get("password"),  
             "role_id": ObjectId(json_request.get("role_id")),
             "profile_image" : json_request.get("profile_image", "")
-            
         }
         new_user = DatabaseModel.save_documents(user, user_data)
         data["message"] = "User created successfully."
@@ -2183,8 +1941,6 @@ def createUser(request):
         data["message"] = "User Already Present."
         data["user_id"] = str(old_user_obj.id)
     return data
-
-
 @csrf_exempt
 def updateUser(request):
     data = dict()
@@ -2201,14 +1957,11 @@ def updateUser(request):
         DatabaseModel.update_documents(user.objects,{"id" : target_user_id},update_obj)
         data["message"] = "User updated successfully."
     return data
-
-
 @csrf_exempt
 def listUsers(request):
     data = dict()
     limit = int(request.GET.get("limit", 100))  
     skip = int(request.GET.get("skip", 0))  
-
     pipeline = [
          {
             "$lookup": {
@@ -2247,8 +2000,6 @@ def listUsers(request):
     users = list(user.objects.aggregate(*pipeline))
     data["users"] = users
     return data
-
-
 def fetchUserDetails(request):
     data = dict()
     target_user_id = request.GET.get("target_user_id")
@@ -2286,10 +2037,7 @@ def fetchUserDetails(request):
     user_obj = list(user.objects.aggregate(*pipeline))
     if user_obj != []:
         data['user_obj'] = user_obj[0]
-   
     return data
-
-
 def fetchRoles(request):
     pipeline = [
         {
@@ -2300,11 +2048,8 @@ def fetchRoles(request):
             }
         }
     ]
-       
     role_list = list(role.objects.aggregate(*pipeline))
     return role_list
-
-
 @csrf_exempt
 def fetchInventryList(request):
     data = dict()
@@ -2313,9 +2058,6 @@ def fetchInventryList(request):
     skip = int(json_request.get('skip'))
     limit = int(json_request.get('limit'))
     search_query = json_request.get('search_query')   
-    
-    
-    
     sort_by = json_request.get('sort_by')
     sort_by_value = json_request.get('sort_by_value')
     pipeline = []
@@ -2323,10 +2065,6 @@ def fetchInventryList(request):
     match = {}
     if marketplace_id != None and marketplace_id != "" and marketplace_id != "all":
         match['marketplace_id'] = ObjectId(marketplace_id)
-    
-    
-    
-    
     if search_query != None and search_query != "":
         search_query = re.escape(search_query.strip())
         match["$or"] = [
@@ -2378,7 +2116,6 @@ def fetchInventryList(request):
         }
         pipeline.append(sort)
     inventry_list = list(Product.objects.aggregate(*(pipeline)))
-    
     count_pipeline.extend([
         {
             "$count": "total_count"
@@ -2386,63 +2123,38 @@ def fetchInventryList(request):
     ])
     total_count_result = list(Product.objects.aggregate(*(count_pipeline)))
     total_count = total_count_result[0]['total_count'] if total_count_result else 0
-
     data['total_count'] = total_count
     data['inventry_list'] = inventry_list
     return data
-
-
-
 def exportOrderReport(request):
-    
     orders = list(Order.objects.all())
-
-    
     workbook = openpyxl.Workbook()
     sheet = workbook.active
     sheet.title = "Order Report"
-
-    
     max_products = max(len(order.order_items) for order in orders) if orders else 1
-
-    
     order_headers = [
         "Purchase Order Id", "Customer Order Id", "Order Date", "Marketplace Name", "Earliest Ship Date",
         "Fulfilment Channel", "Order Status", "Ship Service Level", "Customer Email Id",
         "Has Regulated Items", "Is Replacement Order", "Shipping Information"
     ]
-
-    
     product_headers = []
     for i in range(1, max_products + 1):
         product_headers.extend([
             f"Product {i} Name", f"Product {i} SKU", f"Product {i} Quantity Ordered",
             f"Product {i} Quantity Shipped", f"Product {i} Unit Price"
         ])
-
-    
     fixed_headers = ["Discount", "Tax", "Total Order", "Currency"]
-
-    
     headers = order_headers + product_headers + fixed_headers
-
-    
     yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
     blue_fill = PatternFill(start_color="ADD8E6", end_color="ADD8E6", fill_type="solid")
     bold_font = Font(bold=True)
-
-    
     for col_index, header in enumerate(headers, start=1):
         cell = sheet.cell(row=1, column=col_index, value=header)
         cell.fill = blue_fill
         cell.font = bold_font
-
-    
     row = 2
     for order in orders:
         base_col = 1
-
-        
         if order.shipping_information:
             shipping_info = order.shipping_information
             postal_address = shipping_info.get('postalAddress', {})
@@ -2459,8 +2171,6 @@ def exportOrderReport(request):
                                f"EstimatedDeliveryDate: {shipping_info.get('estimatedDeliveryDate', '')}"
         else:
             shipping_details = None
-
-        
         order_data = [
             order.purchase_order_id, order.customer_order_id,
             order.order_date.strftime('%Y-%m-%d') if order.order_date else None,
@@ -2470,77 +2180,48 @@ def exportOrderReport(request):
             order.customer_email_id, order.has_regulated_items,
             order.is_replacement_order, shipping_details
         ]
-
-        
         for col_index, value in enumerate(order_data, start=base_col):
             sheet.cell(row=row, column=col_index, value=value)
-
-        
         col = base_col + len(order_data)
-
-        
         for product_index, product in enumerate(order.order_items[:max_products]):
             product_details = [
                 product.ProductDetails.Title, product.ProductDetails.SKU,
                 product.ProductDetails.QuantityOrdered, product.ProductDetails.QuantityShipped,
                 product.Pricing['ItemPrice']['Amount'] if product.Pricing else None
             ]
-
-            
             for col_index, value in enumerate(product_details, start=col + product_index * 5):
                 sheet.cell(row=row, column=col_index, value=value)
-
-        
         col = base_col + len(order_data) + (max_products * 5)
-
-        
         fixed_details = [
             order.discount if hasattr(order, 'discount') else None,
             order.tax if hasattr(order, 'tax') else None,
             order.order_total, order.currency
         ]
-
-        
         for col_index, value in enumerate(fixed_details, start=col):
             sheet.cell(row=row, column=col_index, value=value)
-
-        
         row += 1
-
-    
     for col in range(1, sheet.max_column + 1):
         sheet.column_dimensions[get_column_letter(col)].width = 20
-
-    
     output = BytesIO()
     workbook.save(output)
     output.seek(0)
-
-    
     response = HttpResponse(output, content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     response["Content-Disposition"] = 'attachment; filename="Order_Report.xlsx"'
     return response
-
-
-
 @csrf_exempt
 def fetchSalesSummary(request):
     data = {}
     total_sales_pipeline = []
     pipeline = []
     match = {}
-
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id')
     start_date = json_request.get('start_date')  
     end_date = json_request.get('end_date')  
-
-    
     if start_date and end_date:
         start_date = datetime.strptime(start_date, '%Y-%m-%d')
         end_date = datetime.strptime(end_date, '%Y-%m-%d')
         match["order_date"] = {"$gte": start_date, "$lte": end_date}
-
     if marketplace_id != None and marketplace_id != "all" and marketplace_id != "" and marketplace_id != "custom":
         match["marketplace_id"] = ObjectId(marketplace_id)
     if marketplace_id == "all" or marketplace_id != "custom":
@@ -2548,8 +2229,6 @@ def fetchSalesSummary(request):
             match_stage = {"$match": match}
             total_sales_pipeline.append(match_stage)
             pipeline.append(match_stage)
-
-        
         total_sales_pipeline.extend([
             {
                 "$group": {
@@ -2568,7 +2247,6 @@ def fetchSalesSummary(request):
                 }
             }
         ])
-
         summary = list(Order.objects.aggregate(*total_sales_pipeline))
         if summary:
             data['total_sales'] = summary[0].get('total_sales', 0)
@@ -2580,7 +2258,6 @@ def fetchSalesSummary(request):
             data['total_cogs'] = 0
             data['total_refunds'] = 0
             data['margin'] = 0
-
         pipeline.extend([
             {
                 "$unwind": "$order_items"  
@@ -2626,12 +2303,9 @@ def fetchSalesSummary(request):
         else:
             data['total_units_sold'] = 0
             data['total_sold_product_count'] = 0
-
-    
     custom_match = {}
     if start_date and end_date:
         custom_match["purchase_order_date"] = {"$gte": start_date, "$lte": end_date}
-
     custom_pipeline = [
         {"$match": custom_match},
         {"$unwind": "$ordered_products"},
@@ -2654,7 +2328,6 @@ def fetchSalesSummary(request):
             }
         }
     ]
-
     custom_summary = list(custom_order.objects.aggregate(*custom_pipeline))
     if custom_summary:
         total_custom_sales = custom_summary[0].get('total_custom_sales', 0)
@@ -2666,25 +2339,19 @@ def fetchSalesSummary(request):
         total_custom_cogs = 0
         total_custom_units_sold = 0
         total_custom_sold_product_count = 0
-
     if marketplace_id == "custom":
         data['total_sales'] = total_custom_sales
         data['total_cogs'] = total_custom_cogs
         data['total_units_sold'] = total_custom_units_sold
         data['total_sold_product_count'] = total_custom_sold_product_count
         data['margin'] = ((total_custom_sales - total_custom_cogs) / total_custom_sales) * 100 if total_custom_sales else 0
-
     if marketplace_id == "": 
-        
         data['total_sales'] += total_custom_sales
         data['total_cogs'] += total_custom_cogs
         data['total_units_sold'] += total_custom_units_sold
         data['total_sold_product_count'] += total_custom_sold_product_count
         data['margin'] = ((data['total_sales'] - data['total_cogs']) / data['total_sales']) * 100 if data['total_sales'] else 0
-
     return data
-
-
 def getProductVariant(request):
     variant_list = list()
     product_id = request.GET.get('product_id')
@@ -2750,122 +2417,6 @@ def getProductVariant(request):
             }
         ]
         variant_list = list(Product.objects.aggregate(*(pipeline)))
-        
     return variant_list
-
 import logging
-
 logger = logging.getLogger(__name__)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-            
-
-
-        
-        
-            
