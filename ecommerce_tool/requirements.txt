@@ -6,7 +6,7 @@ wheel
 Django==4.2.19
 django-cors-headers>=4.5.0
 djangorestframework==3.15.2
-djangorestframework-simplejwt>=6.2.0
+djangorestframework-simplejwt==5.5.1
 
 # ASGI and cryptography
 asgiref==3.8.1
