@@ -24,5 +24,5 @@ COPY . .
 # Expose the port Render uses
 EXPOSE 10000
 
-# Command to run gunicorn
-CMD ["gunicorn", "ecommerce_tool.wsgi:application", "--bind", "0.0.0.0:10000"]
+# Correct Gunicorn command for nested project structure
+CMD ["gunicorn", "ecommerce_tool.ecommerce_tool.wsgi:application", "--bind", "0.0.0.0:10000"]
