@@ -1,0 +1,20 @@
+{
+  "SAMPLE-SKU-001": {
+    "cogs": 15.0,
+    "shipping_cost": 3.5,
+    "amazon_fees": 2.25,
+    "other_expenses": 1.0
+  },
+  "SAMPLE-SKU-002": {
+    "cogs": 8.75,
+    "shipping_cost": 2.0,
+    "amazon_fees": 1.5,
+    "other_expenses": 0.5
+  },
+  "B08EXAMPLE": {
+    "cogs": 22.5,
+    "shipping_cost": 4.0,
+    "amazon_fees": 3.75,
+    "other_expenses": 1.25
+  }
+}
