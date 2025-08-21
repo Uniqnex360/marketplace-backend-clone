@@ -195,7 +195,7 @@ def changePassword(request):
     return JsonResponse((data), safe=False)
 
 
-@api_view(('GET', 'POST'))
+@api_view(['POST'])
 @csrf_exempt
 def loginUser(request):
     print('in login')
