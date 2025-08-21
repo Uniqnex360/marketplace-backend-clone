@@ -2,7 +2,8 @@ from django.shortcuts import render
 from omnisight.models import *
 from django.http import JsonResponse,HttpResponse
 from ecommerce_tool.custom_mideleware import SIMPLE_JWT, createJsonResponse, createCookies,send_email
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view,permission_classes
+from rest_framework.response import AllowAny
 from django.middleware import csrf
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework.parsers import JSONParser
@@ -196,7 +197,7 @@ def changePassword(request):
 
 
 @api_view(['POST'])
-@csrf_exempt
+@permission_classes([AllowAny])  
 def loginUser(request):
     print('in login')
     jsonRequest = JSONParser().parse(request)
