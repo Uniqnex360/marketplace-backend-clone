@@ -194,9 +194,8 @@ def changePassword(request):
             data['message'] = "User does not exists"
     return JsonResponse((data), safe=False)
 
-
-@api_view(('GET', 'POST'))
 @csrf_exempt
+@api_view(['POST'])                 # you only need POST for a login
 def loginUser(request):
     print('in login')
     jsonRequest = JSONParser().parse(request)
