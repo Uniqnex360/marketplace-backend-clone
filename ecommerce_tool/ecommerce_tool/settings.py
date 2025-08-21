@@ -51,7 +51,8 @@ CSRF_TRUSTED_ORIGINS = [
      "http://34.195.154.218",
     "http://34.195.154.218",
     "http://192.168.30.191:4200",
-    "https://b2bop.netlify.app"
+    "https://b2bop.netlify.app",
+    "https://marketplace-frontend-clone.vercel.app"
 ]
 
 CORS_ALLOW_HEADERS = list(default_headers) + [
