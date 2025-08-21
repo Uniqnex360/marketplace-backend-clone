@@ -33,7 +33,7 @@ DEBUG = True
 ALLOWED_HOSTS = ["*"]
 
 # CORS Configuration - FIXED
-CORS_ALLOW_ALL_ORIGINS = False
+CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 
 # Alternative: Use specific origins instead of CORS_ALLOW_ALL_ORIGINS = True
