@@ -34,7 +34,7 @@ ALLOWED_HOSTS = ["*"]
 
 # CORS Configuration - FIXED
 CORS_ALLOW_ALL_ORIGINS = True
-CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_CREDENTIALS = False
 
 # Alternative: Use specific origins instead of CORS_ALLOW_ALL_ORIGINS = True
 # If you want to be more specific, comment out CORS_ALLOW_ALL_ORIGINS above and uncomment below:
@@ -105,7 +105,7 @@ MIDDLEWARE = [
     # 'ecommerce_tool.custom_mideleware.LogResponseTimeMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
+    # 'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
