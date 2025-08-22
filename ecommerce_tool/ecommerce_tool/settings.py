@@ -88,10 +88,12 @@ INSTALLED_APPS = [
     'django_celery_beat',
     'omnisight',
 ] 
+REDIS_HOST=os.getenv("REDIS_HOST",'127.0.0.1')
+REDIS_PASSWORD=os.getenv('REDIS_PASSWORD','')
 CACHES = {
     'default': {
          "BACKEND": "django_redis.cache.RedisCache",
-        'LOCATION': 'redis://:foobaredUniqnex@127.0.0.1:6379/1',  # Using DB 1, Celery uses DB 0
+        'LOCATION': f'redis://:{REDIS_PASSWORD}@{REDIS_HOST}:6379/1',
         'OPTIONS': {
             'CLIENT_CLASS': 'django_redis.client.DefaultClient',
         },
@@ -237,7 +239,7 @@ SELLERCLOUD_SERVER_ID = os.getenv('SELLERCLOUD_SERVER_ID')  # Replace with your 
 SHIPSTATION_API_SECRET=os.getenv("SHIPSTATION_API_SECRET")
 SHIPSTATION_API_KEY=os.getenv("SHIPSTATION_API_KEY")
 # Celery Configuration
-CELERY_BROKER_URL = 'redis://:foobaredUniqnex@127.0.0.1:6379/0'
+CELERY_BROKER_URL = f'redis://:{REDIS_PASSWORD}@{REDIS_HOST:u}/0'
 
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
