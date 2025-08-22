@@ -5,6 +5,9 @@ from datetime import datetime,timedelta
 from dateutil.relativedelta import relativedelta
 from ecommerce_tool.crud import DatabaseModel
 import threading
+from concurrent.futures import ThreadPoolExecutor
+import pytz
+
 import math
 # from ecommerce_tool.util.shipping_price import get_full_order_and_shipping_details,get_orders_by_customer_and_date
 import logging
@@ -487,7 +490,7 @@ def create_empty_bucket_data(time_key):
     
 def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, product_id=None, 
                   manufacturer_name=None, fulfillment_channel=None, timezone="UTC"):
-    import pytz
+    
     user_timezone = pytz.timezone(timezone) if timezone != 'UTC' else pytz.UTC
     original_start_date = start_date
     original_end_date = end_date
@@ -499,7 +502,9 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
     start_date_utc = start_date_utc.replace(tzinfo=None)
     end_date_utc = end_date_utc.replace(tzinfo=None)
     bucket_to_local_date_map = {}
-    if preset in ["Today", "Yesterday"]:
+    is_single_day=(preset in ['Today',"Yesterday"]) or (start_date.date()==end_date.date())
+    
+    if is_single_day:
         time_buckets = [(start_date_utc + timedelta(hours=i)).replace(minute=0, second=0, microsecond=0) 
                       for i in range(24)]
         time_format = "%Y-%m-%d %H:00:00"
@@ -519,22 +524,16 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
     for dt in time_buckets:
         time_key = dt.strftime(time_format)
         graph_data[time_key] = {
-            "gross_revenue": 0,
-            "net_profit": 0,
-            "profit_margin": 0,
-            "orders": 0,
-            "units_sold": 0,
-            "refund_amount": 0,
-            "refund_quantity": 0
+            "gross_revenue": 0, "net_profit": 0, "profit_margin": 0, "orders": 0,
+            "units_sold": 0, "refund_amount": 0, "refund_quantity": 0
         }
-    if preset not in ["Today", "Yesterday"] and timezone != 'UTC':
+    if not is_single_day and timezone != 'UTC':
         query_end_date = end_date_utc + timedelta(days=1)
     else:
         query_end_date = end_date_utc
     match = {
         'order_status__in': ['Shipped', 'Delivered', 'Acknowledged', 'Pending', 'Unshipped', 'PartiallyShipped'],
-        'order_date__gte': start_date_utc,
-        'order_date__lt': query_end_date
+        'order_date__gte': start_date_utc, 'order_date__lt': query_end_date
     }
     if fulfillment_channel:
         match['fulfillment_channel'] = fulfillment_channel
@@ -554,7 +553,7 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
     orders_by_bucket = {}
     for dt in time_buckets:
         bucket_start = dt
-        if preset in ["Today", "Yesterday"]:
+        if is_single_day:
             bucket_end = dt + timedelta(hours=1)
         else:
             bucket_end = dt + timedelta(days=1)
@@ -563,78 +562,58 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
         bucket_match['order_date__lt'] = bucket_end
         orders = DatabaseModel.list_documents(Order.objects, bucket_match)
         orders_by_bucket[dt.strftime(time_format)] = list(orders)
+    
+
     def process_time_bucket(time_key):
         nonlocal graph_data, orders_by_bucket
         bucket_orders = orders_by_bucket.get(time_key, [])
-        gross_revenue_with_tax = 0
+        
+        
         total_cogs = 0
         refund_amount = 0
         refund_quantity = 0
         total_units = 0
-        temp_other_price = 0
+        temp_other_price = 0 
         vendor_funding = 0
         vendor_discount = 0
         shipping_price = 0
         channel_fee = 0
-        merchant_shipment_cost = 0
-
+        
         bucket_start = datetime.strptime(time_key, time_format).replace(tzinfo=pytz.UTC)
-        if preset in ["Today", "Yesterday"]:
+        if is_single_day:
             bucket_end = bucket_start + timedelta(hours=1)
         else:
             bucket_end = bucket_start + timedelta(days=1)
+        
+        
         refund_ins = refundOrder(bucket_start, bucket_end, marketplace_id, brand_id, product_id)
         if refund_ins:
             for ins in refund_ins:
                 if bucket_start <= ins['order_date'] < bucket_end:
                     refund_amount += ins['order_total']
                     refund_quantity += len(ins['order_items'])
-        for order in bucket_orders: 
-            # total_units += order.items_order_quantity if order.items_order_quantity else 0
-            shipping_price +=getattr(order, 'shipping_price', 0) or 0
 
-            fulfillment_channel = getattr(order,'fulfillment_channel', "")
-            merchant_shipment_cost = getattr(order ,'merchant_shipment_cost', 0) or 0
-            if not merchant_shipment_cost:
-                msc = 0 
-                
-                if fulfillment_channel == 'AFN':
-                    merchant_shipment_cost += getattr(order ,'shipping_price', 0) or 0
-                elif fulfillment_channel == "MFN":
-                    order_number = getattr(order ,'merchant_order_id')
-                    order_details = get_full_order_and_shipping_details(order_number)
-                    if order_details and order_details.get('shipments'):
-                        msc = float(order_details['shipments'][-1].get('shipmentCost', 0) or 0)
-                        order_obj = Order.objects(merchant_order_id=order_number).first()
-                        if order_obj:
-                            order_obj.merchant_shipment_cost = msc
-                            order_obj.save()
-                            
-                elif fulfillment_channel=='SellerFulfilled':
-                    customer_email = getattr(order, 'customer_email_id', "")
-                    order_date = getattr(order, 'order_date', None)
-                    po_id = getattr(order, 'purchase_order_id', "")
-                    shipping_info = get_orders_by_customer_and_date(
-                        customer_email=customer_email,
-                        order_date_utc_iso=order_date,  
-                        purchase_order_id=po_id,
-                         local_tz='US/Pacific'
-                    )
-                    if shipping_info:
-                        msc = float(shipping_info[-1].get('shipmentCost', 0) or 0)
-                        merchant_shipment_cost += msc
-                        order_obj = Order.objects(merchant_order_id=po_id).first()
-                        if order_obj:
-                            order_obj.update(set__merchant_shipment_cost=msc)
-                    else:
-                        msc = 0
-                merchant_shipment_cost += msc or 0
-           
-
+        
+        
+        
+        all_item_ids = []
+        unique_order_ids = set()
+        
+        
+        for order in bucket_orders:
+            shipping_price += getattr(order, 'shipping_price', 0) or 0
+            po_id = getattr(order, 'purchase_order_id', None)
+            if po_id:
+                unique_order_ids.add(po_id)
+            
             for item in order.order_items:
-                pipeline = [
-                    {"$match": {"_id": item.id}},
-                    {"$lookup": {
+                all_item_ids.append(item.id)
+
+        
+        if all_item_ids:
+            pipeline = [
+                {"$match": {"_id": {"$in": all_item_ids}}},
+                {"$lookup": {
                     "from": "product",
                     "localField": "ProductDetails.product_id",
                     "foreignField": "_id",
@@ -642,45 +621,63 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
                 }},
                 {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
                 {"$project": {
-                    "_id": 0,
+                    "_id": 1,
                     "price": {"$ifNull": ["$Pricing.ItemPrice.Amount", 0]},
-                    "QuantityOrdered": {"$ifNull": ["$ProductDetails.QuantityOrdered", 1]},
-                    "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
-                    "tax_price": {"$ifNull": ["$Pricing.ItemTax.Amount", 0]},
-                    "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
-                    "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
+                    "product_cost": {"$ifNull": ["$product_ins.product_cost", 0]},
                     "vendor_discount": {"$ifNull": ["$product_ins.vendor_discount", 0]},
+                    "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
                     "referral_fee": {"$ifNull": ["$product_ins.referral_fee", 0]},
                     "walmart_fee": {"$ifNull": ["$product_ins.walmart_fee", 0]},
+                    "QuantityOrdered": {"$ifNull": ["$ProductDetails.QuantityOrdered", 1]},
                 }}
             ]
-                result = list(OrderItems.objects.aggregate(*pipeline))
-                if result:
-                    temp_other_price += result[0]['price']
-                    quantity = int(result[0].get('QuantityOrdered', 1) or 1)
-                    total_units+=quantity
-                # COGS based on marketplace
-                    vendor_funding += result[0]['vendor_funding']
-                    vendor_discount += result[0]['vendor_discount']
-                # Channel fees: referral_fee or walmart_fee
-                    channel_fee += result[0].get('referral_fee', 0) or result[0].get('walmart_fee', 0) or 0
+            item_results = list(OrderItems.objects.aggregate(*pipeline))
+            item_map = {str(item["_id"]): item for item in item_results}
+            
+            
+            for order in bucket_orders:
+                for item in order.order_items:
+                    item_data = item_map.get(str(item.id))
+                    if not item_data:
+                        continue
+                    
+                    price = float(item_data.get('price', 0) or 0)
+                    quantity = int(item_data.get('QuantityOrdered', 1) or 1)
+                    product_cost = float(item_data.get('product_cost', 0) or 0)
+                    
+                    temp_other_price += price
+                    total_units += quantity
+                    total_cogs += product_cost * quantity
+                    vendor_funding += float(item_data.get('vendor_funding', 0) or 0)
+                    vendor_discount += float(item_data.get('vendor_discount', 0) or 0)
+                    channel_fee += float(item_data.get('referral_fee', 0))
 
-                    gross_revenue_with_tax += result[0]['price']
-        total_cogs += merchant_shipment_cost
-        net_profit = (temp_other_price + shipping_price + vendor_funding - (channel_fee + total_cogs + vendor_discount + merchant_shipment_cost))
+                
+                fulfillment_channel = getattr(order, 'fulfillment_channel', "")
+                merchant_shipment_cost = getattr(order, 'merchant_shipment_cost', 0) or 0
+                if merchant_shipment_cost is None: 
+                    if fulfillment_channel == 'AFN':
+                        merchant_shipment_cost = getattr(order, 'shipping_price', 0) or 0
+                    
+                total_cogs += merchant_shipment_cost
+
+        
+        gross_revenue_with_tax = temp_other_price 
+        net_profit = (temp_other_price + shipping_price + vendor_funding - (channel_fee + total_cogs + vendor_discount))
         profit_margin = round((net_profit / gross_revenue_with_tax) * 100, 2) if gross_revenue_with_tax else 0
 
         graph_data[time_key] = {
             "gross_revenue_with_tax": round(gross_revenue_with_tax, 2),
             "net_profit": round(net_profit, 2),
             "profit_margin": profit_margin,
-            "orders": len(bucket_orders),
+            "orders": len(unique_order_ids),  
             "units_sold": total_units,
             "refund_amount": round(refund_amount, 2),
             "refund_quantity": refund_quantity
-    }
+        }
+        
 
-    from concurrent.futures import ThreadPoolExecutor
+    
     with ThreadPoolExecutor(max_workers=4) as executor:
         futures = {executor.submit(process_time_bucket, time_key): time_key for time_key in graph_data}
         for future in futures:
@@ -688,7 +685,7 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
     converted_graph_data = {}
     start_date_only = original_start_date.date()
     end_date_only = original_end_date.date()
-    if preset in ["Today", "Yesterday"]:
+    if is_single_day:
         for utc_time_key, data in graph_data.items():
             utc_dt = datetime.strptime(utc_time_key, time_format).replace(tzinfo=pytz.UTC)
             local_dt = utc_dt.astimezone(user_timezone)

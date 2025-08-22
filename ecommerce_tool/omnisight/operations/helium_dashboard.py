@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dateutil.relativedelta import relativedelta
 from django.views.decorators.csrf import csrf_exempt
 from datetime import datetime,timedelta
+from rest_framework.permissions import AllowAny
 from bson.son import SON
 from bson import ObjectId
 # from ecommerce_tool.util.shipping_price import get_full_order_and_shipping_details,get_orders_by_customer_and_date
@@ -591,6 +592,7 @@ def RevenueWidgetAPIView(request):
 
 @csrf_exempt
 @api_view(["POST"])
+@permission_classes([AllowAny])
 def updatedRevenueWidgetAPIView(request):
     from django.utils import timezone
     import pytz
