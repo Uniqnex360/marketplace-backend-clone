@@ -3,9 +3,20 @@ version: '3.9'
 services:
   app:
     build: .
+    command: gunicorn ecommerce_tool.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 60
     ports:
       - "8000:8000"
     volumes:
       - .:/app
     environment:
       - DEBUG=1
+      - REDIS_HOST=redis
+      - REDIS_PASSWORD=foobaredUniqnex
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7
+    command: ["redis-server", "--requirepass", "foobaredUniqnex"]
+    ports:
+      - "6379:6379"
