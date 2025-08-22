@@ -236,6 +236,7 @@ class OrderItems(Document):
     document_created_date = DateTimeField()
     PromotionDiscount = FloatField(required=False)
     net_profit = FloatField(default=0.0)
+    updated_at = DateTimeField(default=datetime.utcnow)
 class Order(Document):
     # Tracking IDs
     purchase_order_id = StringField()  # ID generated after a customer orders a product
