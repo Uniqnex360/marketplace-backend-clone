@@ -20,3 +20,20 @@ services:
     command: ["redis-server", "--requirepass", "foobaredUniqnex"]
     ports:
       - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  celery:
+    build: .
+    command: celery -A ecommerce_tool worker --loglevel=info
+    volumes:
+      - .:/app
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PASSWORD=foobaredUniqnex
+    depends_on:
+      - redis
+      - app
+
+volumes:
+  redis_data:
