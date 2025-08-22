@@ -36,6 +36,7 @@ from collections import OrderedDict, defaultdict
 from io import StringIO
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font
+from rest_framework.decorators import api_view, permission_classes
 import io
 from pytz import timezone
 from bson import ObjectId
@@ -587,7 +588,9 @@ def RevenueWidgetAPIView(request):
         if item_result['orders'] == False:
             del data['total']["orders"]
     return data
+
 @csrf_exempt
+@api_view(["POST"])
 def updatedRevenueWidgetAPIView(request):
     from django.utils import timezone
     import pytz
