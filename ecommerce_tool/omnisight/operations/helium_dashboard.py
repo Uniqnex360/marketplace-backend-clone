@@ -1363,6 +1363,7 @@ def clean_json_floats(obj):
     elif isinstance(obj, list):
         return [clean_json_floats(i) for i in obj]
     return obj
+
 @csrf_exempt
 def getPeriodWiseData(request):
     from datetime import timedelta
@@ -1385,7 +1386,7 @@ def getPeriodWiseData(request):
     timezone_str = 'US/Pacific'
 
     
-    cache_key_prefix = 'period_wise_data_' + json.dumps(json_request, sort_keys=True)
+    # cache_key_prefix = 'period_wise_data_' + json.dumps(json_request, sort_keys=True)
 
     
     periods = {
@@ -1502,7 +1503,7 @@ def getPeriodWiseData(request):
                     "previous": previous.get(metric, 0)
                 }
             response_data[key] = data
-            cache.set(f"{cache_key_prefix}_{key}", data, timeout=3600)
+            # cache.set(f"{cache_key_prefix}_{key}", data, timeout=3600)
             
         for key in ordered_keys:
             if key in response_data:
