@@ -1416,11 +1416,11 @@ def getPeriodWiseData(request):
     response_data = {}
 
     
-    for key in ["last7Days", "last30Days", "yearToDate"]:
-        cache_key = f"{cache_key_prefix}_{key}"
-        cached_data = cache.get(cache_key)
-        if cached_data:
-            response_data[key] = cached_data
+    # for key in ["last7Days", "last30Days", "yearToDate"]:
+    #     cache_key = f"{cache_key_prefix}_{key}"
+    #     cached_data = cache.get(cache_key)
+    #     if cached_data:
+    #         response_data[key] = cached_data
 
     
     with ThreadPoolExecutor(max_workers=4) as executor:
