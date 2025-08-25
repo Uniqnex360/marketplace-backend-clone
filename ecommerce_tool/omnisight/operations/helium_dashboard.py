@@ -730,7 +730,7 @@ def updatedRevenueWidgetAPIView(request):
                 if not item_result.get(field, True):
                     data['total'].pop(field, None)
 
-    return data
+    return JsonResponse(data,safe=False)
 
 import pytz
 @csrf_exempt

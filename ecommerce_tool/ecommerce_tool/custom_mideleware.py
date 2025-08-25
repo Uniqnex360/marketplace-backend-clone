@@ -96,9 +96,6 @@ def obtainUserRoleFromToken(request):
 
 
 def skip_for_paths():
-    """
-    decorator for skipping middleware based on path
-    """
     def decorator(f):
         def check_if_health(self, request):
             path = request.path.split("/")
