@@ -8,6 +8,7 @@ from dateutil.relativedelta import relativedelta
 from django.views.decorators.csrf import csrf_exempt
 from datetime import datetime,timedelta
 from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
 from bson.son import SON
 from bson import ObjectId
 # from ecommerce_tool.util.shipping_price import get_full_order_and_shipping_details,get_orders_by_customer_and_date
@@ -730,7 +731,7 @@ def updatedRevenueWidgetAPIView(request):
                 if not item_result.get(field, True):
                     data['total'].pop(field, None)
 
-    return JsonResponse(data,safe=False)
+    return Response(data,safe=False)
 
 import pytz
 @csrf_exempt
