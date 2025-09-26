@@ -27,4 +27,3 @@ MarketLink is a comprehensive data integration platform designed to unify sales 
 *   Mongodb
 
 
-# marketplace-backend-clone

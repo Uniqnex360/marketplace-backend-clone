@@ -5,10 +5,8 @@ from ecommerce_tool.custom_mideleware import SIMPLE_JWT, createJsonResponse, cre
 from rest_framework.decorators import api_view
 from django.middleware import csrf
 from django.views.decorators.csrf import csrf_exempt
-from rest_framework.permissions import AllowAny
 from rest_framework.parsers import JSONParser
 import jwt
-from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from bson import ObjectId
 import pandas as pd
 from ecommerce_tool.crud import DatabaseModel
@@ -105,10 +103,10 @@ def verifyOtp(request):
         if user_obj != None:
             current_time = datetime.now()
 
-            
+            # Check if the time difference is less than 15 minutes
             time_limit = timedelta(minutes=15)
 
-            
+            # Check if the difference is within 15 minutes
             is_within_15_minutes = datetime.now() - current_time <= time_limit
 
             if otp == user_obj.otp and is_within_15_minutes == True:
@@ -177,10 +175,10 @@ def changePassword(request):
         if user_obj != None:
             current_time = datetime.now()
 
-            
+            # Check if the time difference is less than 15 minutes
             time_limit = timedelta(minutes=15)
 
-            
+            # Check if the difference is within 15 minutes
             is_within_15_minutes = datetime.now() - current_time <= time_limit
 
             if otp == user_obj.otp and is_within_15_minutes == True:
@@ -196,15 +194,12 @@ def changePassword(request):
             data['message'] = "User does not exists"
     return JsonResponse((data), safe=False)
 
-@csrf_exempt                      
-@api_view(['POST'])
-@authentication_classes([])       
-@permission_classes([AllowAny])                  
+
+@api_view(('GET', 'POST'))
+@csrf_exempt
 def loginUser(request):
-    print('in login')
     jsonRequest = JSONParser().parse(request)
     user_data_obj = DatabaseModel.get_document(user.objects,jsonRequest)
-    
     token = ''
     valid = False
     if user_data_obj:
@@ -215,14 +210,14 @@ def loginUser(request):
             'name': f"{user_data_obj.first_name} {user_data_obj.last_name or ''}".strip(),
             'email': user_data_obj.email,
             'role_name': role_name,
-            
+            # 'max_age': SIMPLE_JWT['SESSION_COOKIE_MAX_AGE'],
         }
         token = jwt.encode(payload, SIMPLE_JWT['SIGNING_KEY'], algorithm=SIMPLE_JWT['ALGORITHM'])
         valid = True
         response = createJsonResponse(request, token)
 
-        
-        
+        # response = createCookies(token, response)
+        # csrf.get_token(request)
         response.data['data']['valid'] = valid
         response.data['data']['role'] = user_data_obj.role_id.name
         response.data['data'] = {
@@ -231,7 +226,7 @@ def loginUser(request):
             'name': f"{user_data_obj.first_name} {user_data_obj.last_name or ''}".strip(),
             'email': user_data_obj.email,
             'role_name': role_name,
-            
+            # 'max_age': SIMPLE_JWT['SESSION_COOKIE_MAX_AGE'],
         }
     else:
         response = createJsonResponse(request, token)

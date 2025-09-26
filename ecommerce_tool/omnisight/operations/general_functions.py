@@ -1,17 +1,19 @@
 from __future__ import annotations
 import requests
 import uuid
+from collections import defaultdict
+from django.core.cache import cache
 import time 
 import xml.etree.ElementTree as ET  
+from omnisight.decorators import redis_cache
+from ecommerce_tool.util.shipping_price import get_full_order_and_shipping_details,get_orders_by_customer_and_date
+from omnisight.operations.walmart_utils import getAccesstoken
 from omnisight.models import *
 import pandas as pd
 from ecommerce_tool.crud import DatabaseModel
-from bson import ObjectId
 from mongoengine import DoesNotExist
 import json
 import pdfplumber
-from datetime import datetime
-import pytz
 from rest_framework.parsers import JSONParser
 from django.views.decorators.csrf import csrf_exempt
 from datetime import datetime, timedelta
@@ -31,10 +33,8 @@ import math
 from django.http import JsonResponse
 from rest_framework.parsers import JSONParser
 from bson import ObjectId
-from .helium_dashboard import sanitize_data
+from .helium_dashboard import sanitize_data,batch_get_sales_data_optimized,clean_json_floats
 from threading import Thread
-from queue import Queue
-from bson import ObjectId
 logger = logging.getLogger(__name__)
 def sanitize_floats(data):
     """Recursively replace NaN, inf, -inf with None"""
@@ -78,23 +78,23 @@ def getMarketplaceList(request):
     return marketplace_list
 @csrf_exempt
 def getProductList(request):
-    # Get marketplace reference data
-    marketplace_pipeline = [
-        {
-            "$project": {
-                "_id": {"$toString": "$_id"},
-                "name": 1,
-                "image_url": 1,
+    pipeline = [
+            {
+                "$project" : {
+                    "_id" : 1,
+                    "name" : 1,
+                    "image_url" : 1,
+                }
             }
-        }
-    ]
-    marketplace_list = list(Marketplace.objects.aggregate(*marketplace_pipeline))
+        ]
+    marketplace_list = list(Marketplace.objects.aggregate(*(pipeline)))
     data = dict()
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id')
-    skip = int(json_request.get('skip', 0))
-    limit = int(json_request.get('limit', 20))
-    search_query = json_request.get('search_query')
+    skip = int(json_request.get('skip'))
+    limit = int(json_request.get('limit'))
+    search_query = json_request.get('search_query')   
+    marketplace = json_request.get('marketplace')
     category_name = json_request.get('category_name')
     brand_id_list = json_request.get('brand_id_list')
     sort_by = json_request.get('sort_by')
@@ -102,63 +102,57 @@ def getProductList(request):
     pipeline = []
     count_pipeline = []
     match = {}
-    # Filters
-    if marketplace_id:
-        match['marketplace_ids'] = {"$in": [ObjectId(marketplace_id)]}
-    if category_name:
-        match['category'] = {"$in": category_name}
-    if brand_id_list:
-        match['brand_id'] = {"$in": [ObjectId(bid) for bid in brand_id_list]}
-    if search_query:
+    if marketplace_id != None and marketplace_id != "":
+        match['marketplace_ids'] = {"$in":[ObjectId(marketplace_id)]}
+    if category_name != None and category_name != "" and category_name != []:
+        match['category'] = {"$in":category_name}
+    if brand_id_list != None and brand_id_list != "" and brand_id_list != []:
+        match['brand_id'] = {"$in":[ObjectId(brand_id) for brand_id in brand_id_list]}
+    if search_query != None and search_query != "":
         search_query = re.escape(search_query.strip())
         match["$or"] = [
             {"product_title": {"$regex": search_query, "$options": "i"}},
             {"sku": {"$regex": search_query, "$options": "i"}},
         ]
-    if match:
-        match_stage = {"$match": match}
-        pipeline.append(match_stage)
-        count_pipeline.append(match_stage)
-    # Projection
+    if match != {}:
+        match_pipeline = {
+            "$match" : match}
+        pipeline.append(match_pipeline)
+        count_pipeline.append(match_pipeline)
     pipeline.extend([
         {
-            "$project": {
-                "_id": 0,
-                "id": {"$toString": "$_id"},
-                "product_title": 1,
-                "product_id": 1,
-                "sku": 1,
-                "asin": {"$ifNull": ["$asin", ""]},
-                "price": 1,
-                "quantity": 1,
-                "published_status": 1,
-                "category": {"$ifNull": ["$category", ""]},
-                "image_url": {"$ifNull": ["$image_url", ""]},
-                "marketplace_ids": {
-                    "$map": {
-                        "input": {
-                            "$cond": {
-                                "if": {"$isArray": "$marketplace_ids"},
-                                "then": "$marketplace_ids",
-                                "else": ["$marketplace_ids"]  # ensure array
-                            }
-                        },
-                        "as": "mid",
-                        "in": {"$toString": "$$mid"}
-                    }
-                },
+            "$project" : {
+                "_id" : 0,
+                "id" : {"$toString" : "$_id"},
+                "product_title" : 1,
+                "product_id" : 1,
+                "sku" : 1,
+                "asin" : {"$ifNull" : ["$asin",""]},  
+                "price" : 1,
+                "quantity" : 1,
+                "published_status" : 1,
+                "category" : {"$ifNull" : ["$category",""]},  
+                "image_url" : {"$ifNull" : ["$image_url",""]},  
+                "marketplace_ids": {"$ifNull": ["$marketplace_ids", []]},  
                 "marketplace_ins": [],
-                "marketplace_image_url": []
+                "marketplace_image_url": [] 
             }
         },
-        {"$skip": skip},
-        {"$limit": limit}
+        {
+            "$skip" : skip
+        },
+        {
+            "$limit" : limit  
+        }
     ])
-    if sort_by:
-        pipeline.append({"$sort": {sort_by: int(sort_by_value)}})
-    # Run query
-    product_list = list(Product.objects.aggregate(*pipeline))
-    # Attach marketplace names + logos
+    if sort_by != None and sort_by != "":
+        sort = {
+            "$sort" : {
+                sort_by : int(sort_by_value)
+            }
+        }
+        pipeline.append(sort)
+    product_list = list(Product.objects.aggregate(*(pipeline)))
     for ins in product_list:
         marketplace_ids = ins.get('marketplace_ids', [])
         ins['marketplace_details'] = []
@@ -167,9 +161,12 @@ def getProductList(request):
                 ins['marketplace_ins'].append(marketplace['name'])
                 ins['marketplace_image_url'].append(marketplace['image_url'])
         del ins['marketplace_ids']
-    # Count pipeline
-    count_pipeline.extend([{"$count": "total_count"}])
-    total_count_result = list(Product.objects.aggregate(*count_pipeline))
+    count_pipeline.extend([
+        {
+            "$count": "total_count"
+        }
+    ])
+    total_count_result = list(Product.objects.aggregate(*(count_pipeline)))
     total_count = total_count_result[0]['total_count'] if total_count_result else 0
     data['total_count'] = total_count
     data['product_list'] = product_list
@@ -391,7 +388,6 @@ def fetchAllorders(request):
     pacific_tz = pytz.timezone("US/Pacific")
     current_time_pacific = datetime.now(pacific_tz)
     if market_place_id == "custom":
-        # Custom orders logic remains the same
         base_pipeline = []
         if search_query and search_query.strip():
             safe_search = re.escape(search_query.strip())
@@ -417,13 +413,8 @@ def fetchAllorders(request):
         data['total_count'] = total_count
         data['status'] = "custom"
     else:
-        # Regular orders with flexible marketplace lookup
         if market_place_id and market_place_id != 'all':
-            try:
-                pipeline.append({"$match": {"marketplace_id": ObjectId(market_place_id)}})
-            except Exception as e:
-                # If ObjectId conversion fails, try matching as string
-                pipeline.append({"$match": {"marketplace_id": market_place_id}})
+            pipeline.append({"$match": {"marketplace_id": ObjectId(market_place_id)}})
         if search_query and search_query.strip():
             safe_search = re.escape(search_query.strip())
             pipeline.append({"$match": {"purchase_order_id": {"$regex": safe_search, "$options": "i"}}})
@@ -436,75 +427,28 @@ def fetchAllorders(request):
             pipeline.append({"$sort": {sort_by: int(sort_by_value)}})
         else:
             pipeline.append({"$sort": {"order_date": -1}})
-        # FLEXIBLE LOOKUP - Handle both string and ObjectId marketplace_id
         pipeline.extend([
             {"$skip": skip}, {"$limit": limit},
-            # First, try to add a field that converts marketplace_id to ObjectId if it's a string
-            {"$addFields": {
-                "marketplace_id_as_objectid": {
-                    "$cond": {
-                        "if": {"$eq": [{"$type": "$marketplace_id"}, "string"]},
-                        "then": {"$toObjectId": "$marketplace_id"},
-                        "else": "$marketplace_id"
-                    }
-                }
-            }},
-            # Try lookup with ObjectId first
-            {"$lookup": {
-                "from": "marketplace",
-                "localField": "marketplace_id_as_objectid",
-                "foreignField": "_id",
-                "as": "marketplace_ins_objectid"
-            }},
-            # Try lookup with string
-            {"$lookup": {
-                "from": "marketplace",
-                "localField": "marketplace_id",
-                "foreignField": "id",  # Assuming marketplace has string id field
-                "as": "marketplace_ins_string"
-            }},
-            # Merge the results - use whichever lookup found a match
-            {"$addFields": {
-                "marketplace_ins": {
-                    "$cond": {
-                        "if": {"$gt": [{"$size": "$marketplace_ins_objectid"}, 0]},
-                        "then": "$marketplace_ins_objectid",
-                        "else": "$marketplace_ins_string"
-                    }
-                }
-            }},
-            {"$unwind": {"path": "$marketplace_ins", "preserveNullAndEmptyArrays": True}},
+            {"$lookup": {"from": "marketplace", "localField": "marketplace_id", "foreignField": "_id", "as": "marketplace_ins"}},
+            {"$unwind": "$marketplace_ins"},
             {"$project": {
                 "_id": 0, "id": {"$toString": "$_id"}, "purchase_order_id": 1,
                 "order_date": 1, "order_status": 1, "order_total": 1, "currency": 1,
-                "marketplace_name": {"$ifNull": ["$marketplace_ins.name", "Unknown"]}, 
-                "items_order_quantity": 1
+                "marketplace_name": "$marketplace_ins.name", "items_order_quantity": 1
             }}
         ])
-        orders = list(Order.objects.aggregate(*pipeline))
-        # Process timezone conversion
-        processed_orders = []
+        orders = list(Order.objects.aggregate(*(pipeline)))
         for order in orders:
-            try:
-                if order.get('order_date'):
-                    order_date = order['order_date']
-                    if order_date.tzinfo is None:
-                        order_date = pytz.utc.localize(order_date)
-                    order['order_date'] = order_date.astimezone(pacific_tz)
-                    future_threshold = current_time_pacific + timedelta(hours=24)
-                    if order['order_date'] <= future_threshold:
-                        processed_orders.append(order)
-                else:
-                    processed_orders.append(order)
-            except Exception as e:
-                processed_orders.append(order)
-        data['orders'] = processed_orders
+            if order.get('order_date'):
+                order_date_utc = order['order_date'].astimezone(pytz.utc) 
+                order['order_date'] = order_date_utc.astimezone(pacific_tz)  
+        orders = [o for o in orders if o.get('order_date') and o['order_date'] <= current_time_pacific]
+        data['orders'] = orders
         data['total_count'] = total_count
         data['status'] = ""
     marketplace_pipeline = [{"$project" : {"_id" : 0, "id" : {"$toString" : "$_id"}, "name" : 1, "image_url" : 1}}]
     data['marketplace_list'] = list(Marketplace.objects.aggregate(*marketplace_pipeline))
     return Response(data)
-
 def fetchOrderDetails(request):
     data = {}
     user_id = request.GET.get('user_id')
@@ -515,11 +459,6 @@ def fetchOrderDetails(request):
                 "_id": ObjectId(order_id)
             }
         },
-        {
-    "$addFields": {
-        "marketplace_obj_id": {"$toObjectId": "$marketplace_id"}
-    }
-},
         {
             "$lookup": {
                 "from": "marketplace",
@@ -601,6 +540,35 @@ def fetchOrderDetails(request):
         data = order_details[0]
         fulfillment_channel = data.get("fulfillment_channel", "")
         merchant_shipment_cost=data.get('merchant_shipment_cost',0)
+        if not merchant_shipment_cost:
+            if fulfillment_channel=='SellerFulfilled':
+                customer_email=data.get('customer_email_id','')
+                order_date=data.get('order_date',None)
+                po_id=data.get('purchase_order_id',"")
+                shipping_info=get_orders_by_customer_and_date(
+                    customer_email=customer_email,
+                    order_date_utc_iso=order_date,
+                    purchase_order_id=po_id,
+                    local_tz='US/Pacific'
+                )
+                shipment_cost=0
+                if shipping_info:
+                    shipment_cost=float(shipping_info[-1].get('shipmentCost',0) or 0)
+                order_obj=Order.objects(id=ObjectId(order_id)).first()
+                if order_obj:
+                    order_obj.update(set__merchant_shipment_cost=shipment_cost)
+                data['merchant_shipment_cost']=shipment_cost
+            elif fulfillment_channel == "MFN":
+                order_number = data.get("merchant_order_id") or data.get("customer_order_id")
+            if order_number:
+                full_order_details = get_full_order_and_shipping_details(order_number)
+                shipment_cost = 0
+                if full_order_details and full_order_details.get('shipments'):
+                    shipment_cost = float(full_order_details['shipments'][-1].get('shipmentCost', 0) or 0)
+                    order_obj = Order.objects(id=ObjectId(order_id)).first()
+                    if order_obj:
+                        order_obj.update(set__merchant_shipment_cost=shipment_cost)
+                        data["merchant_shipment_cost"] = shipment_cost
         order_items_ids = data.get("order_items", [])
         if order_items_ids:
             order_items = DatabaseModel.list_documents(OrderItems.objects,{"id__in" : order_items_ids})
@@ -929,8 +897,6 @@ def fetchManualOrderDetails(request):
 def ordersCountForDashboard(request):
     from django.utils.timezone import now
     from queue import Queue
-    from threading import Thread
-    from bson import ObjectId
     data = dict()
     marketplace_id = request.GET.get('marketplace_id')
     start_date = request.GET.get('start_date')
@@ -1215,7 +1181,6 @@ def ordersCountForDashboard(request):
         }
     return sanitize_data(data)
 def totalSalesAmount(request):
-    import json
     data = dict()
     marketplace_id = request.GET.get('marketplace_id')
     start_date = request.GET.get('start_date')
@@ -1259,6 +1224,7 @@ def totalSalesAmount(request):
     total_sales = sum(order['order_total'] for order in orders)
     data['total_sales'] = round(total_sales, 2)
     return data
+
 @csrf_exempt
 def salesAnalytics(request):
     try:
@@ -1287,8 +1253,7 @@ def salesAnalytics(request):
             product_id=product_id_list
         )
         orders = [o for o in orders if o.get('order_status') not in ['Cancelled','Canceled'] and o.get('order_total', 0) > 0]
-        data['total_sales'] = sum(o['order_total'] for o in orders)
-        from collections import defaultdict
+        data['total_sales'] = sum(o['original_order_total'] for o in orders)
         order_days = defaultdict(lambda: {'order_count': 0, 'order_value': 0.0})
         for o in orders:
             order_date = o['order_date']
@@ -1305,6 +1270,7 @@ def salesAnalytics(request):
         return sanitized_data
     except Exception as e:
         return {"error": str(e)}
+    
 @csrf_exempt
 def mostSellingProducts(request):
     data = dict()
@@ -1479,11 +1445,8 @@ def change_sign(value):
         return value
 @csrf_exempt
 def getSalesTrendPercentage(request):
-    import pytz
     from pytz import timezone
-    from datetime import datetime, timedelta
     from rest_framework.parsers import JSONParser
-    from bson import ObjectId
     data = dict()
     json_request = JSONParser().parse(request)
     range_type = json_request.get('range_type', 'month')  
@@ -2356,13 +2319,26 @@ def getProductVariant(request):
     variant_list = list()
     product_id = request.GET.get('product_id')
     is_duplicate = request.GET.get('is_duplicate',False)
-    parant_sku = DatabaseModel.get_document(Product.objects,{"id" : product_id},['parent_sku']).parent_sku
-    match = {}
-    match['parent_sku'] = parant_sku
+    start_date=request.GET.get('start_date',None)
+    end_date=request.GET.get('end_date',None)
+    preset=request.GET.get('preset',"Today")
+    timezone_str='US/Pacific'
+    product=DatabaseModel.get_document(Product.objects,{"id":product_id},['parent_sku'])
+    if not product or not product.parent_sku:
+        return []
+    parent_sku = product.parent_sku
+    if start_date and start_date != "":
+        start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
+    else:
+        start_date, end_date = get_date_range(preset, timezone_str)
+    today_start_date, today_end_date = get_date_range("Today", timezone_str)
+    if timezone_str != 'UTC':
+        today_start_date, today_end_date = convertLocalTimeToUTC(today_start_date, today_end_date, timezone_str)
+        start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
+    match = {"parent_sku":parent_sku}
     if is_duplicate == "true":
         match['_id'] = {"$ne" : ObjectId(product_id)}
-    if parant_sku != None:
-        pipeline = [
+    pipeline = [
             {
             "$match": match
             },
@@ -2373,6 +2349,17 @@ def getProductVariant(request):
                 "foreignField": "_id",
                 "as": "marketplace_ins"
             }
+            },
+            {
+                "$addFields":{
+                    "marketplace_ins":{
+                        "$cond":{
+                            "if":{"$eq":[{"$size":"$marketplace_ins"},0]},
+                            "then":[{"name":"Unknown","image_url":""}],
+                            'else':"$marketplace_ins"
+                        }
+                    }
+                }
             },
             {
             "$project": {
@@ -2416,7 +2403,208 @@ def getProductVariant(request):
             }
             }
         ]
-        variant_list = list(Product.objects.aggregate(*(pipeline)))
-    return variant_list
-import logging
-logger = logging.getLogger(__name__)
+    variant_list = list(Product.objects.aggregate(*(pipeline)))
+    product_ids=[variant['id']for variant in variant_list]
+    if not product_ids:
+        return variant_list
+    sales_data = batch_get_sales_data_optimized(product_ids, start_date, end_date, today_start_date, today_end_date)
+    orders_count_raw=OrderItems.objects.aggregate(
+            {
+                "$match":{
+                    "created_date":{"$gte":today_start_date,"$lte":today_end_date},
+                    "ProductDetails._id":{"$in":[ObjectId(pid) for pid in product_ids]}
+                }
+            },
+            {
+                "$group":{
+                    "_id":"$ProductDetails._id",
+                    "count":{"$sum":1}
+                }
+            }
+        )
+    orders_count={str(item['_id']):item['count'] for item in orders_count_raw}
+    for i ,product in enumerate(variant_list):
+        pid=product["id"]
+        product_id=product['id']
+        products_sales=sales_data.get(product_id,{
+                "today": {"revenue": 0, "units": 0},
+            "period": {"revenue": 0, "units": 0},
+            "compare": {"revenue": 0, "units": 0}
+            })
+        today_revenue=products_sales['today']['revenue']
+        period_units=products_sales['period']['units']
+        orders_today=orders_count.get(pid,0)
+        product.update({
+                'salesForToday':round(today_revenue,2),
+                'unitsSoldForToday':round(period_units,2),
+                "ordersForToday":orders_today
+            })
+    return clean_json_floats(variant_list)
+def backfill_missing_merchant_shipment_cost(batch_size=200):
+    print('in backfill`')
+    orders = Order.objects(
+        merchant_shipment_cost=None,
+        order_status__in=["Shipped","Delivered"],
+        fulfillment_channel__in=["MFN", "SellerFulfilled"]
+    ).order_by("-order_date")[:batch_size]
+    for order in orders:
+        print(order.id)
+    logger.info(f" Found {len(orders)} order(s) to process for backfill.")
+    updated_count = 0
+    skipped_count = 0
+    for order in orders:
+        try:
+            fc = order.fulfillment_channel
+            merchant_id = order.merchant_order_id
+            po_id = order.purchase_order_id
+            order_date = order.order_date
+            email = order.customer_email_id
+            if not fc or not order_date:
+                logger.warning(f"Skipping order {order.id}: Missing fulfillment_channel or order_date.")
+                skipped_count += 1
+                continue
+            if fc == "MFN":
+                if not merchant_id:
+                    logger.warning(f"Skipping MFN order {order.id}: Missing merchant_order_id.")
+                    skipped_count += 1
+                    continue
+                logger.info(f"[MFN] Processing order: {merchant_id}")
+                order_data = get_full_order_and_shipping_details(merchant_id)
+                time.sleep(0.5)
+                if order_data and order_data.get("shipments"):
+                    latest = order_data["shipments"][-1]
+                    cost = float(latest.get("shipmentCost", 0) or 0)
+                    if cost > 0:
+                        order.update(set__merchant_shipment_cost=cost)
+                        updated_count += 1
+            elif fc == "SellerFulfilled":
+                if not po_id or not email:
+                    logger.warning(f"Skipping SellerFulfilled order {order.id}: Missing purchase_order_id or email.")
+                    skipped_count += 1
+                    continue
+                logger.info(f"[Seller] Processing PO: {po_id}")
+                shipping_info = get_orders_by_customer_and_date(
+                    customer_email=email,
+                    order_date_utc_iso=order_date,
+                    purchase_order_id=po_id,
+                    local_tz='US/Pacific'
+                )
+                time.sleep(0.5)
+                if shipping_info:
+                    latest = shipping_info[-1]
+                    cost = float(latest.get("shipmentCost", 0) or 0)
+                    if cost > 0:
+                        order.update(set__merchant_shipment_cost=cost)
+                        updated_count += 1
+        except Exception as e:
+            logger.error(f"Error processing order {order.id}: {e}")
+            skipped_count += 1
+    logger.info(f"Finished: Updated {updated_count}, Skipped {skipped_count}")
+    return {
+        "updated": updated_count,
+        "skipped": skipped_count,
+        "batch_size": batch_size,
+        "processed": len(orders)
+    }
+
+from django.views.decorators.http import require_http_methods
+def clear_cache_by_func_name(func_name, prefix="cache"):
+    try:
+        if '*' in func_name or '?' in func_name:
+            patterns = [func_name]
+        elif '.' in func_name:
+            patterns = [
+                f"{prefix}:{func_name}:*",      
+                f"{prefix}:*{func_name}:*",     
+            ]
+        else:
+            patterns = [
+                f"{prefix}:*{func_name}:*",     
+                f"{prefix}:*.{func_name}:*",    
+                f"{prefix}:{func_name}:*",      
+            ]
+        all_keys_to_delete = set()
+        for pattern in patterns:
+            try:
+                keys = cache.keys(pattern)
+                if keys:
+                    all_keys_to_delete.update(keys)
+                    logger.info(f"Found {len(keys)} keys matching pattern: {pattern}")
+            except Exception as e:
+                logger.warning(f"Error searching pattern {pattern}: {e}")
+                continue
+        logger.info(f"Total unique keys found for '{func_name}': {len(all_keys_to_delete)}")
+        deleted_count = 0
+        failed_count = 0
+        for key in all_keys_to_delete:
+            try:
+                if cache.delete(key):
+                    deleted_count += 1
+                    logger.debug(f"Deleted cache key: {key}")
+                else:
+                    failed_count += 1
+                    logger.warning(f"Failed to delete cache key: {key}")
+            except Exception as e:
+                failed_count += 1
+                logger.error(f"Error deleting cache key {key}: {e}")
+        return deleted_count, failed_count
+    except Exception as e:
+        logger.error(f"Error in clear_cache_by_func_name: {e}")
+        return 0, 0
+@require_http_methods(["POST", "GET"])
+@csrf_exempt  
+def clear_cache_key(request):
+    try:
+        key = request.GET.get('key') or (request.POST.get('key') if request.method == 'POST' else None)
+        clear_all = (request.GET.get('all') or (request.POST.get('all') if request.method == 'POST' else None)) == 'true'
+        prefix = request.GET.get('prefix') or (request.POST.get('prefix') if request.method == 'POST' else None) or 'cache'
+        if clear_all:
+            try:
+                cache.clear()
+                logger.info("All cache entries cleared")
+                return {
+                    'status': 'success', 
+                    'message': 'All cache entries have been cleared!',
+                    'cleared_count': 'all'
+                }
+            except Exception as e:
+                logger.error(f"Error clearing all cache: {e}")
+                return {
+                    'status': 'error', 
+                    'message': f'Error clearing all cache: {str(e)}'
+                }
+        if key:
+            try:
+                deleted_count, failed_count = clear_cache_by_func_name(key, prefix)
+                if deleted_count > 0:
+                    message = f'Cleared {deleted_count} cache entries for "{key}"'
+                    if failed_count > 0:
+                        message += f' (failed to delete {failed_count} entries)'
+                    return {
+                        'status': 'success' if failed_count == 0 else 'partial_success',
+                        'message': message,
+                        'cleared_count': deleted_count,
+                        'failed_count': failed_count
+                    }
+                else:
+                    return {
+                        'status': 'warning', 
+                        'message': f'No cache entries found for "{key}"',
+                        'cleared_count': 0
+                    }
+            except Exception as e:
+                logger.error(f"Error clearing cache for key {key}: {e}")
+                return {
+                    'status': 'error', 
+                    'message': f'Error clearing cache: {str(e)}'
+                }
+        return {
+            'status': 'error', 
+            'message': 'Provide ?key=function_name (or module.function or pattern) or ?all=true'
+        }
+    except Exception as e:
+        logger.error(f"Unexpected error in clear_cache_key: {e}")
+        return {
+            'status': 'error', 
+            'message': f'Unexpected error: {str(e)}'
+        }

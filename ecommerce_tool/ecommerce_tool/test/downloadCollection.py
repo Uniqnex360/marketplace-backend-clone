@@ -13,7 +13,7 @@ class MongoDataExtractor:
         
         # Calculate date range for last 3 months
         self.end_date = datetime.now()
-        self.start_date = self.end_date - timedelta(days=90)
+        self.start_date = self.end_date - timedelta(days=60)
         
         print(f"Extracting data from {self.start_date.strftime('%Y-%m-%d')} to {self.end_date.strftime('%Y-%m-%d')}")
     

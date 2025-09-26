@@ -1,5 +1,9 @@
 from __future__ import annotations
-from mongoengine import Document, StringField, FloatField,ObjectIdField, IntField, BooleanField, DictField, ListField, EmbeddedDocument, EmbeddedDocumentField,ReferenceField, DateTimeField
+from email.policy import default
+from math import inf
+
+from click import DateTime
+from mongoengine import Document, StringField,DynamicField, FloatField,ObjectIdField, IntField, BooleanField, DictField, ListField, EmbeddedDocument, EmbeddedDocumentField,ReferenceField, DateTimeField
 from mongoengine.errors import ValidationError
 import re
 import random
@@ -36,8 +40,9 @@ class Manufacturer(Document):
 class Product(Document):
     # General Product Details
     product_title = StringField()
+    wpid = StringField()  
     product_description = StringField()
-    product_id = StringField()  # Can store ASIN, UPC, GTIN, WPID
+    product_id = DynamicField()  # Can store ASIN, UPC, GTIN, WPID
     product_id_type = StringField()
     price = FloatField(default=0.0)
     currency = StringField(default="$")
@@ -47,7 +52,7 @@ class Product(Document):
     item_note = StringField()  # Additional notes about item condition
     #SKU Details
     sku = StringField()
-    master_sku = StringField()  # Master SKU for parent-child relationships
+    master_sku = DynamicField()  # Master SKU for parent-child relationships
     parent_sku = StringField()  # Parent SKU for child products 
     # Platform-Specific Identifiers
     listing_id = StringField()  # Amazon Listing ID
@@ -123,6 +128,17 @@ class Product(Document):
     w_shiping_cost = FloatField(default=0.0)  # Walmart shipping cost
     w_total_cogs = FloatField(default=0.0)  # Total cost of goods sold for Walmart
     pack_size = IntField(default=0)  # Size of the product pack
+    meta = {
+        'indexes': [
+            'marketplace_id',
+            'brand_id',
+            'manufacturer_name',
+            'sku',
+            'asin',
+            ['marketplace_id', 'brand_id'],
+            ['marketplace_id', 'manufacturer_name']
+        ]
+    }
 class CachedMetrics(Document):
     cache_hash = StringField(required=True, unique=True)
     marketplace_id = ReferenceField(Marketplace, null=True) 
@@ -153,6 +169,7 @@ class CachedMetrics(Document):
         {'fields': ['brand_ids']}, 
         {'fields': ['last_updated'], 'expireAfterSeconds': 3600 * 24 * 7}
     ]}
+
 class ignore_api_functions(Document):
     name = StringField()
 class mail_template(Document):
@@ -196,6 +213,7 @@ class Pricing(EmbeddedDocument):
     ItemPrice = EmbeddedDocumentField(Money, required=True)
     ItemTax = EmbeddedDocumentField(Money, default=None)
     PromotionDiscount = EmbeddedDocumentField(Money, default=None)
+    ShipPromotionDiscount=EmbeddedDocumentField(Money,default=None)
 class ProductDetails(EmbeddedDocument):
     product_id = ReferenceField(Product)
     Title = StringField(required=True)
@@ -236,7 +254,16 @@ class OrderItems(Document):
     document_created_date = DateTimeField()
     PromotionDiscount = FloatField(required=False)
     net_profit = FloatField(default=0.0)
+    tax_checked=BooleanField(default=False)
+    pricing_checked=BooleanField(default=False)
     updated_at = DateTimeField(default=datetime.utcnow)
+    meta = {
+        'indexes': [
+            'ProductDetails.product_id',
+            'created_date',
+            ['created_date', 'ProductDetails.product_id']
+        ]
+    }
 class Order(Document):
     # Tracking IDs
     purchase_order_id = StringField()  # ID generated after a customer orders a product
@@ -250,7 +277,7 @@ class Order(Document):
     shipping_rates_date=DateTimeField()
     shipping_cost=FloatField(default=0.0)
     tracking_number=StringField()
-    merchant_shipment_cost=FloatField(default=0.0)
+    merchant_shipment_cost=FloatField()
     # Customer details
     customer_email_id = StringField()  # Email of the customer
     # Order timing
@@ -295,6 +322,18 @@ class Order(Document):
     order_channel = StringField()  # The channel through which the order was placed
     items_order_quantity = IntField(default=0)  # Number of items in the order
     shipping_price = FloatField(default=0.0)  # Shipping cost for the order
+    meta = {
+        'indexes': [
+            'marketplace_id',
+            'order_date',
+            'fulfillment_channel',
+            ['order_date', 'marketplace_id'],
+            ['order_date', 'fulfillment_channel'],
+            ['marketplace_id', 'order_date', 'fulfillment_channel'],
+            'purchase_order_id',
+            'order_items'  # For $lookup operations
+        ]
+    }
     def save(self, *args, **kwargs):
         self.updated_at = datetime.utcnow()
         return super(Order, self).save(*args, **kwargs)
@@ -371,6 +410,78 @@ class custom_order(Document):
     created_at = DateTimeField(default=datetime.now())
     updated_at = DateTimeField(default=datetime.now())
     user_id = ReferenceField(user)
+
+# class EndPointCache(Document):
+#     cache_key=StringField(required=True,unique=True,max_length=200)
+#     endpoint_name=StringField(required=True,max_length=200)
+#     parameters_hash=StringField(required=True,max_length=32)
+#     parameters=DictField()
+#     result=DictField(required=True)
+#     created_at=DateTimeField(default=datetime.utcnow)
+#     expires_at=DateTimeField(required=True)
+#     last_accessed=DateTimeField(default=datetime.utcnow)
+#     hit_count=IntField(default=0)
+#     user_id=ReferenceField(user)
+#     marketplace_id=ReferenceError(Marketplace)
+#     is_popular=BooleanField(default=False)
+#     meta={
+#         "collection":"endpoint_cache",
+#         'indexes': [
+#             {'fields': ['cache_key'], 'unique': True},
+#             {'fields': ['endpoint_name', 'expires_at']},
+            
+#             {'fields': ['expires_at']}, 
+#             {'fields': ['created_at']},
+#             {'fields': ['last_accessed']},
+            
+#             {'fields': ['endpoint_name', 'hit_count']},
+#             {'fields': ['user_id', 'endpoint_name']},
+#             {'fields': ['marketplace_id', 'endpoint_name']},
+            
+#             {'fields': ['endpoint_name', 'parameters_hash']},
+#             {'fields': ['is_popular', 'hit_count']},
+            
+#             {'fields': ['expires_at'], 'expireAfterSeconds': 0}
+#         ]
+#     }
+
+class CacheConfiguration(Document):
+    endpoint_name=StringField(required=True,unique=True,max_length=100)
+    ttl_minutes=IntField(default=30)
+    max_entries=IntField(default=1000)
+    user_specific=BooleanField(default=False)
+    date_sensitive=BooleanField(default=True)
+    exclude_params=ListField(StringField(max_length=50),default=[])
+    sensitive_params=ListField(StringField(max_length=50),default=[])
+    created_at=DateTimeField(default=datetime.utcnow)
+    updated_at=DateTimeField(default=datetime.utcnow)
+    is_active=BooleanField(detault=True)
+    meta={
+        "collection":'cache_configuration',
+        'indexes':[
+            {'fields':['endpoint_name'],"unique":True},
+            {'fields':['is_active']}
+        ]
+    }
+
+class SyncStatus(Document):
+    task_name=StringField(required=True,unique=True,max_length=50)
+    status=StringField(choices=['running','completed','failed','pending'],default='pending')
+    last_run=DateTimeField(default=datetime.utcnow)
+    last_success=DateTimeField()
+    run_count=IntField(default=0)
+    success_count=IntField(default=0)
+    failure_count=IntField(default=0)
+    error_message=StringField(max_length=1000)
+    affected_endpoints=ListField(StringField(max_length=100))
+    meta={
+        'collection':"sync_status",
+        "indexes":[
+            {"fields":['task_name'],"unique":True},
+            {'fields':['status']},
+            {'fields':['last_success']}
+        ]   
+    }
 class authenticated_api(Document):
     name = StringField()
     allowed_roles = ListField(ReferenceField(role))
@@ -466,6 +577,14 @@ class pageview_session_count(Document):
     buy_box_percentage_b2b = FloatField(default=0.0)
     unit_session_percentage = FloatField(default=0.0)
     unit_session_percentage_b2b = FloatField(default=0.0)
+    meta = {
+        'indexes': [
+            'product_id',
+            'date',
+            ['date', 'product_id'],
+            ['product_id', 'date']  # Compound index for range queries
+        ]
+    }
 class inventry_log(Document):
     date = DateTimeField(default=datetime.now())
     product_id = ReferenceField(Product)
