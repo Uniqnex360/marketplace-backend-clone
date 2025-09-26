@@ -4562,6 +4562,8 @@ def getSKUlist(request):
     search_query = json_request.get('search_query')
     brand_id = json_request.get('brand_id')
     manufacturer_name = json_request.get('manufacturer_name')
+    asin_ids=json_request.get('asin_ids',[])
+    
     match =dict()
     pipeline = []
     if search_query != None and search_query != "":
@@ -4574,6 +4576,8 @@ def getSKUlist(request):
         match['brand_id'] = {"$in":brand_list}
     if manufacturer_name != None and manufacturer_name != "" and manufacturer_name != [] and manufacturer_name != "custom":
         match['manufacturer_name'] = {"$in":manufacturer_name}
+    if asin_ids:
+        match['_id']={"$in":[ObjectId(i) for i in asin_ids]}
     if match != {}:
         pipeline.append({"$match": match})
     pipeline.extend([
@@ -4597,6 +4601,7 @@ def getproductIdlist(request):
     brand_id = json_request.get('brand_id')
     search_query = json_request.get('search_query')
     manufacturer_name = json_request.get('manufacturer_name')
+    sku_ids=json_request.get('sku_ids',[])
     match = dict()
     pipeline = []
     if brand_id and isinstance(brand_id, str):
@@ -4617,6 +4622,8 @@ def getproductIdlist(request):
         match['marketplace_id'] = ObjectId(marketplace_id)
     if manufacturer_name and manufacturer_name not in ["", [], "custom"]:
         match['manufacturer_name'] = {"$in": manufacturer_name}
+    if sku_ids:
+        match["_id"]={"$in":[ObjectId(i) for i in sku_ids]}
     if match:
         pipeline.append({"$match": match})
     else:
@@ -4636,13 +4643,28 @@ def getBrandListforfilter(request):
     marketplace_id = request.GET.get('marketplace_id')
     search_query = request.GET.get('search_query')
     skip = int(request.GET.get('skip', 1))
-    product_ids=request.GET.get('product_id[]')
+    product_ids_str = request.GET.getlist('product_ids[]')
+    asin_ids_str = request.GET.getlist('asin_ids[]')
+    sku_ids_str=request.GET.getlist('sku_ids[]')
+    product_id = request.GET.get('product_id', None)
+    all_product_ids_str = list(set(asin_ids_str + sku_ids_str))
+    brand_ids_from_products=None
+    if all_product_ids_str:
+        try:
+            product_ids=[ObjectId(pid) for pid in all_product_ids_str]
+            brand_ids_from_products = Product.objects.filter(id__in=product_ids).distinct('brand_id')
+            if not brand_ids_from_products:
+                return data
+        except Exception:
+            return data
     query = {}
     if marketplace_id and marketplace_id not in ["", "all", "custom"]:
         query['marketplace_id'] = ObjectId(marketplace_id)
     if search_query and search_query.strip():
         search_query = re.escape(search_query.strip())
         query["name"] = {"$regex": search_query, "$options": "i"}
+    if brand_ids_from_products is not None:
+        query["id__in"]=brand_ids_from_products
     if not query:
         brand_cursor = Brand.objects.only('name').order_by('name')
     else:
@@ -4656,6 +4678,8 @@ def getBrandListforfilter(request):
     ]
     data['brand_list'] = brand_list
     return data
+
+
 def obtainManufactureNames(request):
     marketplace_id = request.GET.get('marketplace_id')
     search_query = request.GET.get('search_query')

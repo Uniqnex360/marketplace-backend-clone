@@ -31,7 +31,7 @@ import math
 from django.http import JsonResponse
 from rest_framework.parsers import JSONParser
 from bson import ObjectId
-from .helium_dashboard import sanitize_data
+from .helium_dashboard import sanitize_data,batch_get_sales_data_optimized
 from threading import Thread
 from queue import Queue
 from bson import ObjectId
@@ -2353,28 +2353,49 @@ def fetchSalesSummary(request):
         data['margin'] = ((data['total_sales'] - data['total_cogs']) / data['total_sales']) * 100 if data['total_sales'] else 0
     return data
 def getProductVariant(request):
-    variant_list = list()
+    variant_list = []
+    
     product_id = request.GET.get('product_id')
-    is_duplicate = request.GET.get('is_duplicate',False)
-    parant_sku = DatabaseModel.get_document(Product.objects,{"id" : product_id},['parent_sku']).parent_sku
-    match = {}
-    match['parent_sku'] = parant_sku
+    is_duplicate = request.GET.get('is_duplicate', False)
+    start_date = request.GET.get('start_date', None)
+    end_date = request.GET.get('end_date', None)
+    preset = request.GET.get('preset', "Today")
+    timezone_str = 'US/Pacific'
+
+    product = DatabaseModel.get_document(Product.objects, {"id": product_id}, ['parent_sku'])
+    if not product or not product.parent_sku:
+        return []
+
+    parent_sku = product.parent_sku
+
+    # Time range handling
+    if start_date and start_date != "":
+        start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
+    else:
+        start_date, end_date = get_date_range(preset, timezone_str)
+
+    today_start_date, today_end_date = get_date_range("Today", timezone_str)
+
+    if timezone_str != 'UTC':
+        today_start_date, today_end_date = convertLocalTimeToUTC(today_start_date, today_end_date, timezone_str)
+        start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
+
+    # Whether to exclude self or not
+    match = {"parent_sku": parent_sku}
     if is_duplicate == "true":
-        match['_id'] = {"$ne" : ObjectId(product_id)}
-    if parant_sku != None:
-        pipeline = [
-            {
-            "$match": match
-            },
-            {
+        match['_id'] = {"$ne": ObjectId(product_id)}
+
+    pipeline = [
+        {"$match": match},
+        {
             "$lookup": {
                 "from": "marketplace",
                 "localField": "marketplace_ids",
                 "foreignField": "_id",
                 "as": "marketplace_ins"
             }
-            },
-            {
+        },
+        {
             "$project": {
                 "_id": 0,
                 "id": {"$toString": "$_id"},
@@ -2385,38 +2406,86 @@ def getProductVariant(request):
                 "price": {"$ifNull": ["$price", 0]},
                 "currency": {"$ifNull": ["$currency", ""]},
                 "quantity": {"$ifNull": ["$quantity", 0]},
+                "brand_name": {"$ifNull": ["$brand_name", ""]},
+                "image_url": {"$ifNull": ["$image_url", ""]},
+                "asin": {"$ifNull": ["$asin", ""]},
                 "marketplace_ins": {
-                "$reduce": {
-                    "input": "$marketplace_ins.name",
-                    "initialValue": [],
-                    "in": {
-                    "$cond": {
-                        "if": {"$in": ["$$this", "$$value"]},
-                        "then": "$$value",
-                        "else": {"$concatArrays": ["$$value", ["$$this"]]}
+                    "$reduce": {
+                        "input": "$marketplace_ins.name",
+                        "initialValue": [],
+                        "in": {
+                            "$cond": {
+                                "if": {"$in": ["$$this", "$$value"]},
+                                "then": "$$value",
+                                "else": {"$concatArrays": ["$$value", ["$$this"]]}
+                            }
+                        }
                     }
-                    }
-                }
                 },
                 "marketplace_image_url": {
-                "$reduce": {
-                    "input": "$marketplace_ins.image_url",
-                    "initialValue": [],
-                    "in": {
-                    "$cond": {
-                        "if": {"$in": ["$$this", "$$value"]},
-                        "then": "$$value",
-                        "else": {"$concatArrays": ["$$value", ["$$this"]]}
-                    }
+                    "$reduce": {
+                        "input": "$marketplace_ins.image_url",
+                        "initialValue": [],
+                        "in": {
+                            "$cond": {
+                                "if": {"$in": ["$$this", "$$value"]},
+                                "then": "$$value",
+                                "else": {"$concatArrays": ["$$value", ["$$this"]]}
+                            }
+                        }
                     }
                 }
-                },
-                "brand_name": {"$ifNull": ["$brand_name", ""]},
-                "image_url": {"$ifNull": ["$image_url", ""]}
             }
+        }
+    ]
+
+    variant_list = list(Product.objects.aggregate(*pipeline))
+    product_ids = [v['id'] for v in variant_list]
+
+    if not product_ids:
+        return variant_list
+
+    # ✅ Fix: Pass correctly as a list
+    sales_data = batch_get_sales_data_optimized(product_ids, start_date, end_date, today_start_date, today_end_date)
+
+    # ✅ Fix: Use "created_date" which exists in your OrderItems model
+    orders_count_raw = OrderItems.objects.aggregate(
+        {
+            "$match": {
+                "created_date": {"$gte": today_start_date, "$lte": today_end_date},
+                "ProductDetails._id": {"$in": [ObjectId(pid) for pid in product_ids]}
             }
-        ]
-        variant_list = list(Product.objects.aggregate(*(pipeline)))
+        },
+        {
+            "$group": {
+                "_id": "$ProductDetails._id",
+                "count": {"$sum": 1}
+            }
+        }
+    )
+    orders_count = {str(item['_id']): item['count'] for item in orders_count_raw}
+
+    for product in variant_list:
+        pid = product["id"]
+        product_sales = sales_data.get(
+            pid,
+            {
+                "today": {"revenue": 0, "units": 0},
+                "period": {"revenue": 0, "units": 0},
+                "compare": {"revenue": 0, "units": 0}
+            }
+        )
+
+        today_revenue = product_sales["today"]["revenue"]
+        today_units = product_sales["today"]["units"]
+        orders_today = orders_count.get(pid, 0)
+
+        product.update({
+            "salesForToday": round(today_revenue, 2),
+            "unitsSoldForToday": round(today_units, 2),
+            "ordersForToday": orders_today
+        })
+
     return variant_list
 import logging
 logger = logging.getLogger(__name__)
