@@ -1106,7 +1106,7 @@ def getPreviousDateRange(start_date, end_date):
     return previous_start_date.strftime("%Y-%m-%d"), previous_end_date.strftime("%Y-%m-%d")
 
 @csrf_exempt
-@redis_cache(timeout=900,key_prefix='get_products_with_pagination')
+# @redis_cache(timeout=900,key_prefix='get_products_with_pagination')
 def get_products_with_pagination(request):
     # return main(request)
     json_request = JSONParser().parse(request)
@@ -1712,7 +1712,7 @@ def clean_json_floats(obj):
     return obj
 
 @csrf_exempt
-@redis_cache(timeout=900,key_prefix='getPeriodWiseData')
+# @redis_cache(timeout=900,key_prefix='getPeriodWiseData')
 def getPeriodWiseData(request):
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")

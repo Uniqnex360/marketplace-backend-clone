@@ -88,17 +88,17 @@ INSTALLED_APPS = [
     'django_celery_beat',
     'omnisight',
 ] 
-CACHES = {
-    'default': {
-        "BACKEND": "django_redis.cache.RedisCache",
-        'LOCATION': 'redis://:foobaredUniqnex@127.0.0.1:6379/1',  # Using DB 1, Celery uses DB 0
-        'OPTIONS': {
-            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-        },
-        # 'KEY_PREFIX': 'metrics_cache',
-        # 'TIMEOUT': 300,  # 5 minutes default timeout
-    }
-}
+# CACHES = {
+#     'default': {
+#         "BACKEND": "django_redis.cache.RedisCache",
+#         'LOCATION': 'redis://:foobaredUniqnex@127.0.0.1:6379/1',  # Using DB 1, Celery uses DB 0
+#         'OPTIONS': {
+#             'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+#         },
+#         # 'KEY_PREFIX': 'metrics_cache',
+#         # 'TIMEOUT': 300,  # 5 minutes default timeout
+#     }
+# }
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',  # MUST be first
     'django.middleware.security.SecurityMiddleware',

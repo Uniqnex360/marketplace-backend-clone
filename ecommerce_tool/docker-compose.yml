@@ -10,18 +10,18 @@ services:
       - .:/app
     environment:
       - DEBUG=1
-      - REDIS_HOST=redis
-      - REDIS_PASSWORD=foobaredUniqnex
+      # - REDIS_HOST=redis
+      # - REDIS_PASSWORD=foobaredUniqnex
     depends_on:
       - redis
 
-  redis:
-    image: redis:7
-    command: ["redis-server", "--requirepass", "foobaredUniqnex"]
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
+  # redis:
+  #   image: redis:7
+  #   command: ["redis-server", "--requirepass", "foobaredUniqnex"]
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis_data:/data
 
   # celery:
   #   build: .
@@ -35,5 +35,5 @@ services:
   #     - redis
   #     - app
 
-volumes:
-  redis_data:
+# volumes:
+#   redis_data:
