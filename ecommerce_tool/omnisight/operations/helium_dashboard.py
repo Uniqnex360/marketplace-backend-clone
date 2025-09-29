@@ -1,7 +1,7 @@
 from __future__ import annotations
 import pandas as pd
 from omnisight.operations.core_calculator import EcommerceCalculator
-from omnisight.decorators import redis_cache
+# from omnisight.decorators import redis_cache
 from mongoengine import Q
 from omnisight.models import OrderItems,Order,Marketplace,Product,CityDetails,user,notes_data,chooseMatrix,Fee,Refund,Brand,inventry_log,productPriceChange
 from mongoengine.queryset.visitor import Q
