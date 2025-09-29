@@ -5,7 +5,7 @@ from collections import defaultdict
 from django.core.cache import cache
 import time 
 import xml.etree.ElementTree as ET  
-from omnisight.decorators import redis_cache
+# from omnisight.decorators import redis_cache
 from ecommerce_tool.util.shipping_price import get_full_order_and_shipping_details,get_orders_by_customer_and_date
 from omnisight.operations.walmart_utils import getAccesstoken
 from omnisight.models import *
