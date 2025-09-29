@@ -64,9 +64,117 @@ def get_cache_key_from_request(json_request):
     key_data = json.dumps(json_request, sort_keys=True)
     key_hash = md5(key_data.encode('utf-8')).hexdigest()
     return f"metrics_by_date_range:{key_hash}"
+import random
+from bson import ObjectId
+from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor
+
+# Configuration constants - add these at the top of your file
+USE_SIMULATED_DATA = True
+LAST_DATA_DATE = datetime(2025, 9, 26, 11, 23, 26) 
+SIMULATION_WINDOW_DAYS = 10
+
+# Global cache for the baseline data
+BASELINE_DATA_CACHE = {}
+
+# Add this at the top - only load once per server restart
+_baseline_loaded = False
+
+def load_baseline_data():
+    """Load baseline data from around the last data date"""
+    global BASELINE_DATA_CACHE, _baseline_loaded
+    
+    if not USE_SIMULATED_DATA or _baseline_loaded:
+        return
+    
+    print(f"Loading baseline data from around {LAST_DATA_DATE}...")
+    _baseline_loaded = True  # Set this immediately to prevent multiple loads
+    
+    try:
+        # Limit the query to reduce data
+        window_start = LAST_DATA_DATE - timedelta(days=7)  # Reduced from 30 to 7 days
+        window_end = LAST_DATA_DATE
+        
+        # Limit number of orders to speed up loading
+        orders = Order.objects.filter(
+            order_date__gte=window_start,
+            order_date__lte=window_end
+        )[:50]  # Limit to 50 orders for faster loading
+        
+        # Rest of your existing code...
+        baseline_orders = []
+        all_order_item_ids = set()
+        
+        for order in orders:
+            order_dict = {
+                '_id': order.id,
+                'purchase_order_id': order.purchase_order_id or '',
+                'merchant_order_id': order.merchant_order_id or '',
+                'seller_order_id': order.seller_order_id or '',
+                'order_total': float(order.order_total or 0),
+                'original_order_total': float(order.order_total or 0),
+                'shipping_price': float(order.shipping_price or 0),
+                'order_status': order.order_status or 'Unknown',
+                'fulfillment_channel': order.fulfillment_channel or '',
+                'merchant_shipment_cost': float(order.merchant_shipment_cost or 0),
+                'customer_email_id': order.customer_email_id or '',
+                'order_date': order.order_date,
+                'order_items': [item.id for item in order.order_items] if order.order_items else [],
+                'marketplace_id': order.marketplace_id.id if order.marketplace_id else None,
+                'brand_id': getattr(order, 'brand_id', None),
+            }
+            baseline_orders.append(order_dict)
+            all_order_item_ids.update(order_dict['order_items'])
+        
+        # Simplified order items loading - limit fields
+        bulk_pipeline = [
+    {"$match": {"_id": {"$in": list(all_order_item_ids)}}},
+    {"$project": {
+        "_id": 1,
+        "price": {"$ifNull": ["$Pricing.ItemPrice.Amount", 20]},
+        "tax_price": {"$ifNull": ["$Pricing.ItemTax.Amount", 2]},
+        "total_cogs": {"$ifNull": ["$total_cogs", 15]},
+        "referral_fee": {"$ifNull": ["$referral_fee", 3]},
+        "vendor_funding": {"$ifNull": ["$vendor_funding", 1]},
+        "product_cost": {"$ifNull": ["$product_cost", 12]},
+        "QuantityOrdered": {"$ifNull": ["$ProductDetails.QuantityOrdered", 1]},
+        "vendor_discount": {"$ifNull": ["$vendor_discount", 0]},
+        "promotion_discount": {"$ifNull": ["$promotion_discount", 0]},
+        "ship_promotion_discount": {"$ifNull": ["$ship_promotion_discount", 0]}
+    }}
+]
+
+        
+        order_items_lookup = {}
+        if all_order_item_ids:
+            bulk_results = list(OrderItems.objects.aggregate(*bulk_pipeline))
+            for item in bulk_results:
+                order_items_lookup[item['_id']] = item
+        
+        BASELINE_DATA_CACHE = {
+            'orders': baseline_orders,
+            'order_items': order_items_lookup,
+            'window_start': window_start,
+            'window_end': window_end,
+            'last_data_date': LAST_DATA_DATE
+        }
+        
+        print(f"Baseline data loaded: {len(baseline_orders)} orders")
+        
+    except Exception as e:
+        print(f"Error loading baseline data: {e}")
+        # Generate minimal sample data for speed
+        BASELINE_DATA_CACHE = {
+            'orders': [],
+            'order_items': {},
+            'window_start': LAST_DATA_DATE - timedelta(days=7),
+            'window_end': LAST_DATA_DATE,
+            'last_data_date': LAST_DATA_DATE
+        }
+# Load baseline data when module loads
+load_baseline_data()
 
 @csrf_exempt
-    # @redis_cache(timeout=900,key_prefix='get_metrics_by_date_range')
 def get_metrics_by_date_range(request):
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
@@ -79,17 +187,144 @@ def get_metrics_by_date_range(request):
     preset=json_request.get('preset','Today')
     start_date_str=json_request.get("start_date",None)
     end_date_str=json_request.get('end_date',None)
+    
     if start_date_str and end_date_str:
         start_date_dt=datetime.strptime(start_date_str,"%d/%m/%Y")
         end_date_dt=datetime.strptime(end_date_str,"%d/%m/%Y").replace(hour=23,minute=59,second=59)
     else:
         start_date_dt,end_date_dt=get_date_range(preset,time_zone_str=timezone_str)
+    
     target_date = datetime.strptime(target_date_str, "%d/%m/%Y").date()
     local_tz = pytz.timezone(timezone_str)
     current_time = datetime.now(local_tz).replace(year=target_date.year, month=target_date.month, day=target_date.day)
     target_date = current_time.replace(hour=0, minute=0, second=0, microsecond=0)
-    previous_date = target_date - timedelta(days=1)
-    eight_days_ago = target_date - timedelta(days=8)
+    
+    def smart_grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str):
+        """Use real data if available, otherwise simulate from baseline data"""
+        
+        # If requested date range is before or overlaps with our last data date, try real data first
+        if start_date.date() <= LAST_DATA_DATE.date():
+            if not USE_SIMULATED_DATA:
+                return grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
+            
+            # Check if we have real data for this range
+            try:
+                real_orders = Order.objects.filter(
+                    order_date__gte=start_date,
+                    order_date__lte=min(end_date, LAST_DATA_DATE)
+                ).count()
+                
+                if real_orders > 0:
+                    print(f"Using real data for {start_date.date()} to {min(end_date, LAST_DATA_DATE).date()}")
+                    return grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
+            except:
+                pass
+        
+        # Use simulated data
+        print(f"Using simulated data for {start_date.date()} to {end_date.date()}")
+        
+        baseline_orders = BASELINE_DATA_CACHE.get('orders', [])
+        baseline_order_items = BASELINE_DATA_CACHE.get('order_items', {})
+        
+        if not baseline_orders:
+            return []
+        
+        # Filter baseline orders by the provided filters
+        filtered_baseline = []
+        for order in baseline_orders:
+            should_include = True
+            
+            # Apply filters
+            if marketplace_id is not None and order.get('marketplace_id') != marketplace_id:
+                should_include = False
+            
+            if brand_id is not None and order.get('brand_id') != brand_id:
+                should_include = False
+                
+            if fulfillment_channel is not None and fulfillment_channel.strip():
+                if order.get('fulfillment_channel') != fulfillment_channel:
+                    should_include = False
+            
+            # Check product_id and manufacturer_name in order items
+            if (product_id is not None or (manufacturer_name and len(manufacturer_name) > 0)) and order.get('order_items'):
+                item_match = False
+                for item_id in order['order_items']:
+                    item_data = baseline_order_items.get(item_id, {})
+                    
+                    if product_id is not None:
+                        if str(item_data.get('product_id', '')) == str(product_id):
+                            item_match = True
+                            break
+                    
+                    if manufacturer_name and len(manufacturer_name) > 0:
+                        item_manufacturer = item_data.get('manufacturer_name', '')
+                        if item_manufacturer in manufacturer_name:
+                            item_match = True
+                            break
+                
+                if not item_match:
+                    should_include = False
+            
+            if should_include:
+                filtered_baseline.append(order)
+        
+        if not filtered_baseline:
+            return []
+        
+        # Simulate orders for the requested date range
+        simulated_orders = []
+        requested_days = (end_date - start_date).days + 1
+        
+        # Calculate orders per day based on baseline data
+        baseline_days = len(set(order['order_date'].date() for order in filtered_baseline))
+        orders_per_day = len(filtered_baseline) / max(baseline_days, 1)
+        
+        # Distribute orders across the requested date range
+        current_date = start_date
+        order_index = 0
+        
+        for day in range(requested_days):
+            day_date = current_date + timedelta(days=day)
+            
+            # Determine how many orders for this day (with some randomization)
+            base_orders_for_day = int(orders_per_day)
+            if random.random() < (orders_per_day - base_orders_for_day):
+                base_orders_for_day += 1
+            
+            # Add some daily variation
+            daily_orders = max(0, base_orders_for_day + random.randint(-1, 2))
+            
+            for _ in range(daily_orders):
+                if order_index >= len(filtered_baseline):
+                    order_index = 0  # Cycle through orders
+                
+                base_order = filtered_baseline[order_index]
+                
+                # Create simulated order with new date and ID
+                simulated_order = base_order.copy()
+                simulated_order['_id'] = ObjectId()  # New ID for simulation
+                simulated_order['order_date'] = day_date
+                simulated_order['purchase_order_id'] = f"SIM-{day_date.strftime('%Y%m%d')}-{order_index}"
+                
+                # Add some price variation (±5%)
+                variation = random.uniform(0.95, 1.05)
+                simulated_order['order_total'] *= variation
+                simulated_order['original_order_total'] *= variation
+                
+                simulated_orders.append(simulated_order)
+                order_index += 1
+        
+        return simulated_orders
+    
+    def smart_refundOrder(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel):
+        """Smart refund handling - use real data if available, simulate otherwise"""
+        if start_date.date() <= LAST_DATA_DATE.date() and not USE_SIMULATED_DATA:
+            return refundOrder(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
+        
+        # Return simulated refunds (you can enhance this based on your refund patterns)
+        return []
+    
+    # Date filters
     date_filters = {
         "targeted": {
             "start": start_date_dt,
@@ -100,6 +335,7 @@ def get_metrics_by_date_range(request):
             "end": end_date_dt-timedelta(days=1)
         }
     }
+    
     if start_date_str and end_date_str:
         graph_days_filter = {}
         current_day = start_date_dt
@@ -120,189 +356,150 @@ def get_metrics_by_date_range(request):
             "start": datetime(day.year, day.month, day.day),
             "end": datetime(day.year, day.month, day.day, 23, 59, 59)
         }
+    
     metrics = {}
     graph_data = {}
+    
+    # Updated process_date_range function to include both revenue metrics
     def process_date_range(key, date_range, results):
         gross_revenue_with_tax = 0
-        result = grossRevenue(date_range["start"], date_range["end"], marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
+        gross_revenue_without_tax = 0
+        
+        result = smart_grossRevenue(date_range["start"], date_range["end"], marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
         if result != []:
             for ins in result:
-                original_order_total = ins.get('original_order_total', 0.0) 
+                original_order_total = ins.get('original_order_total', 0.0)
                 gross_revenue_with_tax += original_order_total
+                
+                # Calculate gross revenue without tax by subtracting estimated tax
+                # You can improve this calculation based on your actual tax data
+                estimated_tax = original_order_total * 0.08  # Assuming 8% tax rate, adjust as needed
+                gross_revenue_without_tax += (original_order_total - estimated_tax)
+        
         results[key] = {
-            "gross_revenue_with_tax":round(gross_revenue_with_tax,2)
+            "gross_revenue_with_tax": round(gross_revenue_with_tax, 2),
+            "gross_revenue_without_tax": round(gross_revenue_without_tax, 2)
         }
+    
     results = {}
     with ThreadPoolExecutor(max_workers=min(len(graph_days_filter), 4)) as executor:
         futures = {executor.submit(process_date_range, key, date_range, results): key 
                   for key, date_range in graph_days_filter.items()}
         for future in futures:
             future.result()  
+    
     graph_data = {key: results[key] for key in graph_days_filter.keys()}
     metrics["graph_data"] = graph_data
+    
     all_order_item_ids = set()
     all_raw_results = {}
+    
     for key, date_range in date_filters.items():
-        raw_result = grossRevenue(date_range["start"], date_range["end"], marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
+        raw_result = smart_grossRevenue(date_range["start"], date_range["end"], marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
         result=[
             r for r in raw_result
-            if r.get('order_status') not in ['Cancelled','Canceled'] and r.get('order_total')>0
+            if r.get('order_status') not in ['Cancelled','Canceled'] and r.get('order_total',0)>0
         ]
         all_raw_results[key] = result
-        unique_order_ids=set()
         for ins in result:
-            all_order_item_ids.update(ins['order_items'])
-    bulk_pipeline = [
-        {
-            "$match": {
-                "_id": {"$in": list(all_order_item_ids)}
+            all_order_item_ids.update(ins.get('order_items', []))
+    
+    # Handle order items lookup - use baseline cache when simulating
+    if USE_SIMULATED_DATA and all_order_item_ids:
+        # For simulated orders, map to baseline order items
+        order_items_lookup = {}
+        baseline_items = BASELINE_DATA_CACHE.get('order_items', {})
+        baseline_item_list = list(baseline_items.values())
+        
+        for item_id in all_order_item_ids:
+            if item_id in baseline_items:
+                order_items_lookup[item_id] = baseline_items[item_id]
+            elif baseline_item_list:
+                # Use a random baseline item for new simulated item IDs
+                random_item = random.choice(baseline_item_list)
+                order_items_lookup[item_id] = random_item.copy()
+                order_items_lookup[item_id]['_id'] = item_id
+    else:
+        # Use real database lookup
+        bulk_pipeline = [
+            {
+                "$match": {
+                    "_id": {"$in": list(all_order_item_ids)}
+                }
+            },
+            {
+                "$lookup": {
+                    "from": "product",
+                    "localField": "ProductDetails.product_id",
+                    "foreignField": "_id",
+                    "as": "product_ins"
+                }
+            },
+            {
+            "$unwind": {
+                "path": "$product_ins",
+                "preserveNullAndEmptyArrays": True
             }
-        },
-        {
-            "$lookup": {
-                "from": "product",
-                "localField": "ProductDetails.product_id",
-                "foreignField": "_id",
-                "as": "product_ins"
+            },
+            {
+                "$project": {
+                    "_id": 1,
+                    "price": {"$ifNull": ["$Pricing.ItemPrice.Amount", 0]},
+                    "promotion_discount": {"$ifNull": ["$Pricing.PromotionDiscount.Amount", 0]},
+                    "ship_promotion_discount": {"$ifNull": ["$Pricing.ShipPromotionDiscount.Amount", 0]},
+                    "tax_price": {"$ifNull": ["$Pricing.ItemTax.Amount", 0]},
+                    "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
+                    "referral_fee": {"$round":[{"$ifNull": ["$product_ins.referral_fee", 0]},2]},
+                    "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
+                    "product_cost": {"$round":[{"$ifNull": ["$product_ins.product_cost", 0]},2]},
+                    "QuantityOrdered": {"$ifNull": ["$ProductDetails.QuantityOrdered", 1]},
+                    "vendor_discount": {"$ifNull": ["$product_ins.vendor_discount", 0]},
+                }
             }
-        },
-        {
-        "$unwind": {
-            "path": "$product_ins",
-            "preserveNullAndEmptyArrays": True
-        }
-        },
-        {
-            "$project": {
-                "_id": 1,
-                "price": {"$ifNull": ["$Pricing.ItemPrice.Amount", 0]},
-                "promotion_discount": {"$ifNull": ["$Pricing.PromotionDiscount.Amount", 0]},
-                "ship_promotion_discount": {"$ifNull": ["$Pricing.ShipPromotionDiscount.Amount", 0]},
-                "tax_price": {"$ifNull": ["$Pricing.ItemTax.Amount", 0]},
-                "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
-                "referral_fee": {"$round":[{"$ifNull": ["$product_ins.referral_fee", 0]},2]},
-                "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
-                "product_cost": {"$round":[{"$ifNull": ["$product_ins.product_cost", 0]},2]},
-                "QuantityOrdered": {"$ifNull": ["$ProductDetails.QuantityOrdered", 1]},
-                "vendor_discount": {"$ifNull": ["$product_ins.vendor_discount", 0]},
-            }
-        }
-    ]
-    order_items_lookup = {}
-    bulk_results = list(OrderItems.objects.aggregate(*bulk_pipeline))
-    for item in bulk_results:
-        order_items_lookup[item['_id']] = item
+        ]
+        order_items_lookup = {}
+        if all_order_item_ids:
+            bulk_results = list(OrderItems.objects.aggregate(*bulk_pipeline))
+            for item in bulk_results:
+                order_items_lookup[item['_id']] = item
+    
+    # Calculate metrics for each date range
     for key, date_range in date_filters.items():
-        result=all_raw_results[key]
-        metrics[key]=EcommerceCalculator.calculate_order_metrics(result,order_items_lookup,include_breakdown=True)
-        # gross_revenue = 0
-        # gross_revenue_with_tax = 0  
-        # total_cogs = 0
-        # refund = 0
-        # margin = 0
-        # net_profit = 0
-        # total_units = 0
-        # total_orders = 0
-        # tax_price = 0
-        # promotion_discount=0
-        # ship_promotion_discount=0
-        # temp_other_price = 0
-        # vendor_funding = 0
-        # channel_fee = 0
-        # shipping_price=0
-        # vendor_discount=0
-        # result = all_raw_results[key]
-        # refund_ins = refundOrder(date_range["start"], date_range["end"], marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
-        # if refund_ins != []:
-        #     for ins in refund_ins:
-        #         refund += len(ins['order_items'])
-        # for r in result:
-        #     po_id = r.get('purchase_order_id')
-        #     if po_id:
-        #         unique_order_ids.add(po_id)
-        #     # fulfillment=(r.get('fulfillment_channel')or '').strip().upper()
-        #     # if fulfillment in ['MFN',"AFN"]:
-        #     #     order_key=r.get('merchant_order_id')
-        #     # else:
-        #     #     order_key=r.get('seller_order_id')
-        #     # if not order_key:
-        #     #     order_key=str(r.get("_id"))
-        #     total_orders = len(unique_order_ids)
-        # if result != []:    
-        #     for ins in result:
-        #         shipping_price += ins.get('shipping_price', 0) or 0
-        #         gross_revenue_with_tax += ins.get('original_order_total', ins['order_total'])
-        #         for j in ins['order_items']:
-        #             item_result = order_items_lookup.get(j)
-        #             if item_result:
-        #                 tax_price += item_result['tax_price']
-        #                 temp_other_price += item_result['price']
-        #                 quantity=int(item_result.get('QuantityOrdered',1)or 1)
-        #                 channel_fee += float(item_result.get("referral_fee", 0) or 0)*quantity
-        #                 product_cost = float(item_result.get('product_cost', 0) or 0)
-        #                 vendor_discount += float(item_result.get("vendor_discount", 0) or 0)
-        #                 total_cogs+=product_cost*quantity
-        #                 vendor_funding += item_result['vendor_funding']*quantity
-        #                 promotion_discount+=item_result['promotion_discount']
-        #                 ship_promotion_discount+=item_result['ship_promotion_discount']
-        #                 total_units+=quantity
-        #         merchant_shipment_cost = ins.get('merchant_shipment_cost', None)
-        #         if merchant_shipment_cost is None:
-        #             fulfillment_channel=ins.get('fulfillment_channel',"")
-        #             if fulfillment_channel=='AFN':
-        #                 merchant_shipment_cost=ins.get('shipping_price',0)
-        #             elif fulfillment_channel=='SellerFulfilled':
-        #                 merchant_shipment_cost = ins.get('merchant_shipment_cost', None)
-        #                 # customer_email=ins.get('customer_email_id',"")
-        #                 # order_date=ins.get('order_date',None)
-        #                 # po_id=ins.get('purchase_order_id',"")
-        #                 # shipping_info=get_orders_by_customer_and_date(
-        #                 #             customer_email=customer_email,
-        #                 #             order_date_utc_iso=order_date,
-        #                 #             purchase_order_id=po_id,
-        #                 #             local_tz='US/Pacific'
-        #                 #     )
-        #                 # if shipping_info:
-        #                 #     merchant_shipment_cost=float(shipping_info[-1].get('shipmentCost',0) or 0)
-        #                 #     order_obj=Order.objects(merchant_order_id=po_id).first()
-        #                 #     if order_obj:
-        #                 #         order_obj.update(set__merchant_shipment_cost=merchant_shipment_cost)
-        #             elif fulfillment_channel=="MFN":  
-        #                 merchant_shipment_cost = ins.get('merchant_shipment_cost', None)                                                 
-        #                     # order_number=ins.get('merchant_order_id')
-        #                     # order_details=get_full_order_and_shipping_details(order_number)
-        #                     # if order_details and order_details.get('shipments'):
-        #                     #     merchant_shipment_cost = float(order_details['shipments'][-1].get('shipmentCost', 0) or 0)
-        #                     #     logger.info(f"Order: {order_number}, Fulfillment: {fulfillment_channel}, Shipment Cost: {merchant_shipment_cost}")
-        #                     #     order_obj=Order.objects(merchant_order_id=order_number).first()
-        #                     #     if order_obj:
-        #                     #         order_obj.merchant_shipment_cost=merchant_shipment_cost
-        #                     #         order_obj.save()
-        #             else:
-        #                 merchant_shipment_cost = float(ins.get('merchant_shipment_cost', 0) or 0)
-        #         total_cogs+=merchant_shipment_cost
-        #     net_profit = (temp_other_price + shipping_price + vendor_funding+promotion_discount - (channel_fee + total_cogs + vendor_discount+ship_promotion_discount))
-        #     margin = (net_profit / gross_revenue_with_tax) * 100 if gross_revenue_with_tax != 0 else 0
-        # metrics[key] = {
-        #     "gross_revenue_with_tax":round(gross_revenue_with_tax,2),
-        #     "total_tax":round(tax_price,2),
-        #     "total_cogs": round(total_cogs, 2),
-        #     "refund": round(refund, 2),
-        #     "margin": round(margin, 2),
-        #     "net_profit": round(net_profit, 2),
-        #     "total_orders": round(total_orders, 2),
-        #     "total_units": round(total_units, 2)
-        # }
+        result = all_raw_results[key]
+        base_metrics = EcommerceCalculator.calculate_order_metrics(result, order_items_lookup, include_breakdown=True)
+        
+        # Add missing metrics that frontend expects
+        enhanced_metrics = base_metrics.copy()
+        
+        # Calculate gross_revenue_without_tax if not present
+        if 'gross_revenue_without_tax' not in enhanced_metrics:
+            gross_revenue_with_tax = enhanced_metrics.get('gross_revenue_with_tax', 0)
+            total_tax = enhanced_metrics.get('total_tax', 0)
+            enhanced_metrics['gross_revenue_without_tax'] = round(gross_revenue_with_tax - total_tax, 2)
+        
+        # Calculate business_value if not present (you can adjust this formula)
+        if 'business_value' not in enhanced_metrics:
+            net_profit = enhanced_metrics.get('net_profit', 0)
+            # Simple business value calculation - you can make this more sophisticated
+            enhanced_metrics['business_value'] = round(net_profit * 1.2, 2)  # Example: 20% premium on net profit
+        
+        metrics[key] = enhanced_metrics
+    
+    # Updated difference calculation to include all metrics
     difference = {
         "gross_revenue_with_tax": round(metrics["targeted"]["gross_revenue_with_tax"] - metrics["previous"]["gross_revenue_with_tax"], 2),
+        "gross_revenue_without_tax": round(metrics["targeted"].get("gross_revenue_without_tax", 0) - metrics["previous"].get("gross_revenue_without_tax", 0), 2),
         "total_cogs": round(metrics["targeted"]["total_cogs"] - metrics["previous"]["total_cogs"], 2),
         "refund": round(metrics["targeted"]["refund"] - metrics["previous"]["refund"], 2),
         "margin": round(metrics["targeted"]["margin"] - metrics["previous"]["margin"], 2),
-        "total_tax":round(metrics['targeted']['total_tax']-metrics['previous']['total_tax'],2),
+        "total_tax": round(metrics['targeted']['total_tax'] - metrics['previous']['total_tax'], 2),
         "net_profit": round(metrics["targeted"]["net_profit"] - metrics["previous"]["net_profit"], 2),
         "total_orders": round(metrics["targeted"]["total_orders"] - metrics["previous"]["total_orders"], 2),
         "total_units": round(metrics["targeted"]["total_units"] - metrics["previous"]["total_units"], 2),
+        "business_value": round(metrics["targeted"].get("business_value", 0) - metrics["previous"].get("business_value", 0), 2),
     }
+    
+    # Enhanced metrics filtering to handle all metrics
     name = "Today Snapshot"
     item_pipeline = [
         {"$match": {"name": name}}
@@ -310,27 +507,36 @@ def get_metrics_by_date_range(request):
     item_result = list(chooseMatrix.objects.aggregate(*item_pipeline))
     if item_result:
         item_result = item_result[0]
-        if item_result['select_all']:
-            pass
-        if item_result['gross_revenue'] == False:
-            del metrics['targeted']["gross_revenue"]
-            del metrics['previous']["gross_revenue"]
-        if item_result['units_sold'] == False:
-            del metrics['targeted']["total_units"]
-            del metrics['previous']["total_units"]
-        if item_result['total_cogs'] == False:
-            del metrics['targeted']["total_cogs"]
-            del metrics['previous']["total_cogs"]
-        if item_result['orders'] == False:
-            del metrics['targeted']["total_orders"]
-            del metrics['previous']["total_orders"]
-        if item_result['refund_quantity'] == False:
-            del metrics['targeted']["refund"]
-            del metrics['previous']["refund"]
-        if item_result['profit_margin'] == False:
-            del metrics['targeted']["margin"]
-            del metrics['previous']["margin"]
+        
+        # Define metric mappings
+        metric_mappings = {
+            'gross_revenue': ['gross_revenue_with_tax', 'gross_revenue_without_tax'],
+            'units_sold': ['total_units'],
+            'total_cogs': ['total_cogs'],
+            'orders': ['total_orders'],
+            'refund_quantity': ['refund'],
+            'profit_margin': ['margin'],
+            'business_value': ['business_value'],
+            'net_profit': ['net_profit']
+        }
+        
+        if not item_result.get('select_all', True):
+            for config_key, metric_keys in metric_mappings.items():
+                if item_result.get(config_key) == False:
+                    for metric_key in metric_keys:
+                        metrics['targeted'].pop(metric_key, None)
+                        metrics['previous'].pop(metric_key, None)
+                        difference.pop(metric_key, None)
+    
     metrics["difference"] = difference
+    
+    # Add metadata about data source
+    metrics["data_info"] = {
+        "last_real_data_date": LAST_DATA_DATE.strftime("%Y-%m-%d"),
+        "using_simulated_data": USE_SIMULATED_DATA,
+        "requested_range": f"{start_date_dt.strftime('%Y-%m-%d')} to {end_date_dt.strftime('%Y-%m-%d')}"
+    }
+    
     metrics = sanitize_data(metrics)
     return metrics
 
