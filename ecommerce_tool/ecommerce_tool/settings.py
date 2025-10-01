@@ -50,6 +50,8 @@ CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",
     "http://34.195.154.218",
     "http://192.168.30.191:4200",
+    "https://dev-marketplace.duckdns.org",
+    "https://prod-marketplace.duckdns.org",
     "https://marketplace-frontend-development.vercel.app",
     "https://marketplace-integration-app.vercel.app", 
     "https://b2bop.netlify.app"
