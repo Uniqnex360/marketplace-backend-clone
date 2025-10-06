@@ -187,14 +187,14 @@ def get_metrics_by_date_range(request):
     preset=json_request.get('preset','Today')
     start_date_str=json_request.get("start_date",None)
     end_date_str=json_request.get('end_date',None)
-    cache_key=generate_cache_key('get_metrics_by_date_range',json_request)
-    print('cache_key',cache_key)
-    cache_obj=EndPointCache.objects(endpoint_name="get_metrics_by_date_range").first()
-    print(f"got the cache{cache_obj}")
-    if cache_obj:
-        logger.info(f"Database fallback cache hit for {cache_key}")
-        return cache_obj.result
-    print('cacheobj',cache_obj)
+    # cache_key=generate_cache_key('get_metrics_by_date_range',json_request)
+    # print('cache_key',cache_key)
+    # cache_obj=EndPointCache.objects(endpoint_name="get_metrics_by_date_range").first()
+    # print(f"got the cache{cache_obj}")
+    # if cache_obj:
+    #     logger.info(f"Database fallback cache hit for {cache_key}")
+    #     return cache_obj.result
+    # print('cacheobj',cache_obj)
     if start_date_str and end_date_str:
         start_date_dt=datetime.strptime(start_date_str,"%d/%m/%Y")
         end_date_dt=datetime.strptime(end_date_str,"%d/%m/%Y").replace(hour=23,minute=59,second=59)
