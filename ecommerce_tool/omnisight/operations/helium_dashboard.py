@@ -214,19 +214,19 @@ def get_metrics_by_date_range(request):
         targeted_start=local_tz.localize(datetime.combine(target_date,datetime.min.time()))
         targeted_end_date=targeted_start.replace(hour=23,minute=59,second=59)
         previous_start=targeted_start-timedelta(days=1)
-        previous_end=targeted_end-timedelta(days=1)
+        previous_end=targeted_end_date-timedelta(days=1)
     else:
         targeted_start=start_date_dt
-        targeted_end=end_date_dt
-        prevous_start=start_date_dt-timedelta(days=1)
-        previous_end=targeted_end-timedelta(days=1)
+        targeted_end_date=end_date_dt
+        previous_start=start_date_dt-timedelta(days=1)
+        previous_end=targeted_end_date-timedelta(days=1)
     date_filters = {
         "targeted": {
             "start": targeted_start,
-            "end": targeted_end
+            "end": targeted_end_date
         },
         "previous": {
-            "start": prevous_start,
+            "start": previous_start,
             "end": previous_end
         }
     }
