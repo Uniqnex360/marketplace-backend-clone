@@ -1,0 +1,54 @@
+.
+├── ecommerce_tool
+│   ├── asgi.py
+│   ├── celery.py
+│   ├── crud.py
+│   ├── custom_mideleware.py
+│   ├── __init__.py
+│   ├── __pycache__
+│   │   ├── celery.cpython-38.pyc
+│   │   ├── crud.cpython-38.pyc
+│   │   ├── custom_mideleware.cpython-38.pyc
+│   │   ├── __init__.cpython-38.pyc
+│   │   ├── renderers.cpython-38.pyc
+│   │   ├── settings.cpython-38.pyc
+│   │   ├── urls.cpython-38.pyc
+│   │   └── wsgi.cpython-38.pyc
+│   ├── settings.py
+│   ├── urls.py
+│   └── wsgi.py
+├── manage.py
+├── omnisight
+│   ├── admin.py
+│   ├── apps.py
+│   ├── __init__.py
+│   ├── migrations
+│   │   ├── __init__.py
+│   │   └── __pycache__
+│   ├── models.py
+│   ├── operations
+│   │   ├── amazon_operations.py
+│   │   ├── amazon_utils.py
+│   │   ├── common_operations.py
+│   │   ├── common_utils.py
+│   │   ├── general_functions.py
+│   │   ├── helium_dashboard.py
+│   │   ├── helium_utils.py
+│   │   ├── __init__.py
+│   │   ├── __pycache__
+│   │   ├── walmart_operations.py
+│   │   └── walmart_utils.py
+│   ├── __pycache__
+│   │   ├── admin.cpython-38.pyc
+│   │   ├── apps.cpython-38.pyc
+│   │   ├── __init__.cpython-38.pyc
+│   │   ├── models.cpython-38.pyc
+│   │   ├── tasks.cpython-38.pyc
+│   │   └── urls.cpython-38.pyc
+│   ├── tasks.py
+│   ├── tests.py
+│   ├── urls.py
+│   └── views.py
+└── project_structure.txt
+
+8 directories, 43 files
