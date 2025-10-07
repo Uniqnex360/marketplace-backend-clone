@@ -44,6 +44,8 @@ from concurrent.futures import ThreadPoolExecutor
 import math
 from omnisight.models import *
 from django.utils import timezone
+timezone_str = 'US/Pacific'
+local_tz = pytz.timezone(timezone_str)
 import logging
 logger = logging.getLogger(__name__)
 def sanitize_data(data):
@@ -177,6 +179,7 @@ def sanitize_data(data):
 @csrf_exempt
 def get_metrics_by_date_range(request):
     json_request = JSONParser().parse(request)
+    
     marketplace_id = json_request.get('marketplace_id', None)
     target_date_str = json_request.get('target_date')
     brand_id = json_request.get('brand_id', None)
@@ -184,6 +187,7 @@ def get_metrics_by_date_range(request):
     manufacturer_name = json_request.get('manufacturer_name', [])
     fulfillment_channel = json_request.get('fulfillment_channel', None)
     timezone_str="US/Pacific"
+    local_tz = pytz.timezone(timezone_str)
     preset=json_request.get('preset','Today')
     start_date_str=json_request.get("start_date",None)
     end_date_str=json_request.get('end_date',None)
@@ -201,19 +205,29 @@ def get_metrics_by_date_range(request):
     else:
         start_date_dt,end_date_dt=get_date_range(preset,time_zone_str=timezone_str)
     target_date = datetime.strptime(target_date_str, "%d/%m/%Y").date()
-    local_tz = pytz.timezone(timezone_str)
+    
     current_time = datetime.now(local_tz).replace(year=target_date.year, month=target_date.month, day=target_date.day)
     target_date = current_time.replace(hour=0, minute=0, second=0, microsecond=0)
     previous_date = target_date - timedelta(days=1)
     eight_days_ago = target_date - timedelta(days=8)
+    if preset=='Today' or target_date_str:
+        targeted_start=local_tz.localize(datetime.combine(target_date,datetime.min.time()))
+        targeted_end_date=targeted_start.replace(hour=23,minute=59,second=59)
+        previous_start=targeted_start-timedelta(days=1)
+        previous_end=targeted_end-timedelta(days=1)
+    else:
+        targeted_start=start_date_dt
+        targeted_end=end_date_dt
+        prevous_start=start_date_dt-timedelta(days=1)
+        previous_end=targeted_end-timedelta(days=1)
     date_filters = {
         "targeted": {
-            "start": start_date_dt,
-            "end": end_date_dt
+            "start": targeted_start,
+            "end": targeted_end
         },
         "previous": {
-            "start": start_date_dt-timedelta(days=1),
-            "end": end_date_dt-timedelta(days=1)
+            "start": prevous_start,
+            "end": previous_end
         }
     }
     if start_date_str and end_date_str:
@@ -460,7 +474,8 @@ def LatestOrdersTodayAPIView(request):
     fulfillment_channel = json_request.get('fulfillment_channel', None)
     pacific = pytz.timezone("US/Pacific")
     utc = pytz.UTC
-    now_pacific = datetime.now(pacific)
+    fixed_date = datetime.strptime("25/09/2025", "%d/%m/%Y")
+    now_pacific = pacific.localize(fixed_date)
     start_of_day_pacific = now_pacific.replace(hour=0, minute=0, second=0, microsecond=0)
     end_of_day_pacific = now_pacific.replace(hour=23, minute=59, second=59, microsecond=999999)
     start_of_day_utc = start_of_day_pacific.astimezone(utc)
@@ -696,10 +711,16 @@ def updatedRevenueWidgetAPIView(request):
     timezone_str = "US/Pacific"
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
-    if start_date not in [None, ""]:
-        start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
+    local_tz = pytz.timezone(timezone_str)
+    if preset=='Today':
+        start_date = datetime.strptime("25/09/2025", "%d/%m/%Y")
+        start_date=local_tz.localize(start_date)
+        end_date=start_date.replace(hour=23,minute=59,second=59)
     else:
-        start_date, end_date = get_date_range(preset, timezone_str)
+        if start_date not in [None, ""]:
+            start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
+        else:
+            start_date, end_date = get_date_range(preset, timezone_str)
     compare_enabled = compare_startdate not in [None, ""]
     if compare_enabled:
         compare_startdate = datetime.strptime(compare_startdate, "%Y-%m-%d").replace(
@@ -800,6 +821,7 @@ def updatedRevenueWidgetAPIView(request):
                 if not item_result.get(field, True):
                     data['total'].pop(field, None)
     return data
+
 @csrf_exempt
 def get_top_products(request):
     json_request = JSONParser().parse(request)
@@ -811,17 +833,26 @@ def get_top_products(request):
     start_date_str = json_request.get("start_date", None)
     end_date_str = json_request.get("end_date", None)
     timezone_str = "US/Pacific"
-    if start_date_str and end_date_str:
-        local_tz = pytz.timezone(timezone_str)
-        naive_from_date = datetime.strptime(start_date_str, '%Y-%m-%d')
-        naive_to_date = datetime.strptime(end_date_str, '%Y-%m-%d')
-        localized_from_date = local_tz.localize(naive_from_date)
-        localized_to_date = local_tz.localize(naive_to_date).replace(hour=23, minute=59, second=59)
-        start_date = localized_from_date.astimezone(pytz.UTC)
-        end_date = localized_to_date.astimezone(pytz.UTC)
-    else:
-        start_date, end_date = get_date_range(preset, timezone_str)  
-    duration_hours = (end_date - start_date).total_seconds() / 3600
+    if preset=='Today':
+        start_date_str = datetime.strptime("25/09/2025", "%d/%m/%Y")
+        start_date_str=local_tz.localize(start_date_str)
+        end_date_str=start_date_str.replace(hour=23,minute=59,second=59)
+        start_date = start_date_str.astimezone(pytz.UTC)  
+        end_date = end_date_str.astimezone(pytz.UTC) 
+    elif start_date_str and end_date_str:
+        if isinstance(start_date_str,str):
+            start_date_str = datetime.strptime(start_date_str, "%Y-%m-%d")
+        if isinstance(start_date_str,str):
+            end_date_str = datetime.strptime(end_date_str, "%Y-%m-%d")
+        if start_date_str.tzinfo is None:
+            start_date_str=local_tz.localize(start_date_str)
+        if end_date_str.tzinfo is None:
+            end_date_str=local_tz.localize(end_date_str.replace(hour=23,minute=59,second=59))
+    # if start_date:
+    #     from_date, to_date = convertdateTotimezone(start_date, end_date, timezone)
+    else:       
+        start_date, end_date = get_date_range(preset, timezone) 
+    duration_hours = (end_date - start_date_str).total_seconds() / 3600
     if duration_hours <= 24:
         chart_date_format = "%Y-%m-%d %H:00:00+00:00"
     else:
@@ -1878,6 +1909,7 @@ def exportPeriodWiseCSV(request):
     writer.writerow(headers)
     writer.writerows(period_rows)
     return response
+
 @csrf_exempt
 def getPeriodWiseDataCustom(request):
     def to_utc_format(dt):
@@ -1892,14 +1924,19 @@ def getPeriodWiseDataCustom(request):
     preset = json_request.get("preset")
     start_date = json_request.get("start_date")
     end_date = json_request.get("end_date")
+    local_tz = pytz.timezone(timezone_str)
+    if preset=='Today':
+        start_date = datetime.strptime("25/09/2025", "%d/%m/%Y")
+        start_date=local_tz.localize(start_date)
+        end_date=start_date.replace(hour=23,minute=59,second=59)
     if start_date:
-        local_tz = pytz.timezone(timezone_str)
-        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
-        localized_from_date = local_tz.localize(naive_from_date)
-        localized_to_date = local_tz.localize(naive_to_date.replace(hour=23, minute=59, second=59))  
-        from_date = localized_from_date.astimezone(pytz.UTC)
-        to_date = localized_to_date.astimezone(pytz.UTC)
+        
+        naive_from_date = start_date
+        naive_to_date = end_date
+        localized_from_date = safe_localize(start_date,local_tz)
+        localized_to_date = safe_localize(end_date.replace(hour=23,minute=59,second=59),local_tz)
+        from_date = start_date.astimezone(pytz.UTC)
+        to_date = end_date.astimezone(pytz.UTC)
     else:
         from_date, to_date = get_date_range(preset, timezone_str)
     duration = to_date - from_date
@@ -2051,10 +2088,17 @@ def allMarketplaceData(request):
     timezone_str = 'US/Pacific'
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
-    if start_date:
-        from_date, to_date = convertdateTotimezone(start_date, end_date, timezone_str)
+    if preset=='Today':
+        start_date = datetime.strptime("25/09/2025", "%d/%m/%Y")
+        start_date=local_tz.localize(start_date)
+        end_date=start_date.replace(hour=23,minute=59,second=59)
+        from_date=start_date
+        to_date=end_date
     else:
-        from_date, to_date = get_date_range(preset, timezone_str)
+        if start_date not in [None, ""]:
+            from_date, to_date = convertdateTotimezone(start_date, end_date, timezone_str)
+        else:
+            from_date, to_date = get_date_range(preset, timezone_str)
     marketplace_dict = {
         str(mp.id): mp.name for mp in Marketplace.objects.only("id", "name")
     }
@@ -2657,7 +2701,7 @@ def getProductPerformanceSummary(request):
     fulfillment_channel = json_request.get('fulfillment_channel',None)
     timezone_str =  'US/Pacific'
     local_tz = pytz.timezone(timezone_str)
-    today = datetime.now(local_tz)
+    today = datetime.strptime("25/09/2025", "%d/%m/%Y")
     yesterday_start_date = today - timedelta(days=1)
     yesterday_start_date = yesterday_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
     yesterday_end_date = yesterday_start_date.replace(hour=23, minute=59, second=59)
@@ -3311,9 +3355,26 @@ def getProfitAndLossDetails(request):
     timezone = 'US/Pacific'
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
-    if start_date:
-        from_date, to_date = convertdateTotimezone(start_date, end_date, timezone)
-    else:
+    timezone_str = 'US/Pacific'
+    local_tz = pytz.timezone(timezone_str)
+    if preset=='Today':
+        start_date = datetime.strptime("25/09/2025", "%d/%m/%Y")
+        start_date=local_tz.localize(start_date)
+        end_date=start_date.replace(hour=23,minute=59,second=59)
+        from_date = start_date.astimezone(pytz.UTC)  
+        to_date = end_date.astimezone(pytz.UTC) 
+    elif start_date and end_date:
+        if isinstance(start_date,str):
+            start_date = datetime.strptime(start_date, "%Y-%m-%d")
+        if isinstance(start_date,str):
+            end_date = datetime.strptime(end_date, "%Y-%m-%d")
+        if start_date.tzinfo is None:
+            start_date=local_tz.localize(start_date)
+        if end_date.tzinfo is None:
+            end_date=local_tz.localize(end_date.replace(hour=23,minute=59,second=59))
+    # if start_date:
+    #     from_date, to_date = convertdateTotimezone(start_date, end_date, timezone)
+    else:       
         from_date, to_date = get_date_range(preset, timezone)
     def pLcalculate_metrics(start_date, end_date, marketplace_id, brand_id, product_id,
                             manufacturer_name, fulfillment_channel, timezone):
@@ -3506,11 +3567,25 @@ def profit_loss_chart(request):
     timezone = 'US/Pacific'
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
-    
-    if start_date != None and start_date != "":
-        from_date, to_date = convertdateTotimezone(start_date,end_date,timezone)
-    else:
-        from_date, to_date = get_date_range(preset,timezone)
+    if preset=='Today':
+        start_date = datetime.strptime("25/09/2025", "%d/%m/%Y")
+        start_date=local_tz.localize(start_date)
+        end_date=start_date.replace(hour=23,minute=59,second=59)
+        from_date = start_date.astimezone(pytz.UTC)  
+        to_date = end_date.astimezone(pytz.UTC) 
+    elif start_date and end_date:
+        if isinstance(start_date,str):
+            start_date = datetime.strptime(start_date, "%Y-%m-%d")
+        if isinstance(start_date,str):
+            end_date = datetime.strptime(end_date, "%Y-%m-%d")
+        if start_date.tzinfo is None:
+            start_date=local_tz.localize(start_date)
+        if end_date.tzinfo is None:
+            end_date=local_tz.localize(end_date.replace(hour=23,minute=59,second=59))
+    # if start_date:
+    #     from_date, to_date = convertdateTotimezone(start_date, end_date, timezone)
+    else:       
+        from_date, to_date = get_date_range(preset, timezone)
     
     def get_month_range(year, month):
         start_date = datetime(year, month, 1)
@@ -3706,7 +3781,7 @@ def profit_loss_chart(request):
     current_pacific_time = datetime.now(pacific_tz)
     
     # Determine interval type and keys
-    if start_date and end_date and start_date[:10] == end_date[:10]:
+    if start_date and end_date and start_date.date==end_date.date():
         total_hours = int((to_date - from_date).total_seconds() // 3600) + 1
         interval_keys = []
         for i in range(total_hours):
@@ -3780,6 +3855,11 @@ def profit_loss_chart(request):
     graph = [{"metric": metric, "values": values[metric]} for metric in metrics]
     
     return JsonResponse({"graph": graph}, safe=False)
+def safe_localize(dt, tz):
+    if dt.tzinfo is None:  # it's naive
+        return tz.localize(dt)
+    return dt  # already timezone-aware
+
 @csrf_exempt
 def profitLossExportXl(request):
     json_request = JSONParser().parse(request)
@@ -5121,13 +5201,13 @@ def InsightsProductWise(request):
         ]
     ]
 })
+    
 @csrf_exempt
 def getProfitAndLossDetailsForProduct(request):
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     json_request = JSONParser().parse(request)
     product_id = json_request.get('product_id')
-    preset = json_request.get('preset')
     preset = json_request.get('preset')
     timezone_str = json_request.get('timezone', 'US/Pacific')
     start_date = json_request.get("start_date", None)
