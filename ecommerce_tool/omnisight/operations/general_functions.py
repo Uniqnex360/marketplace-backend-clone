@@ -48,9 +48,15 @@ def sanitize_floats(data):
         return round(data, 2)  
     else:
         return data
+    
 def getMarketplaceList(request):
-    pipeline = [
-        {
+    country=request.GET.get('country')
+    pipeline=[]
+    if country:
+        pipeline.append({
+            "$match":{"country":country}
+        })
+    pipeline.append({
             "$project": {
                 "_id": 0,
                 "id": {"$toString": "$_id"},
@@ -72,8 +78,7 @@ def getMarketplaceList(request):
                     }
                 }
             }
-        }
-    ]
+        })
     marketplace_list = list(Marketplace.objects.aggregate(*pipeline))
     return marketplace_list
 @csrf_exempt
