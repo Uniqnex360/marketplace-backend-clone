@@ -158,13 +158,13 @@ from mongoengine import connect
 connect(
     db=os.getenv('DATABASE_NAME'),
     host=os.getenv('DATABASE_HOST'),
-    maxPoolSize=50,          # maximum pooled connections per Gunicorn worker
-    minPoolSize=5,           # keep a few warm connections
-    socketTimeoutMS=60000,   # optional – drops dead sockets instead of hanging
-    connectTimeoutMS=15000   # fail fast if Mongo is unreachable
+    maxPoolSize=50,
+    minPoolSize=5,
+    socketTimeoutMS=180000,    # 3 minutes for long aggregations
+    connectTimeoutMS=30000     # 30 s for initial connection
 )
 # Password validation
-# https://docs.djangoproject.com/en/4.2/ref/settings/#auth-password-validators
+# https://docs.djangoproject.com/en/4.2/ref/settings/   #auth-password-validators
 
 AUTH_PASSWORD_VALIDATORS = [
     {
