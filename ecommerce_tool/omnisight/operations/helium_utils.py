@@ -189,43 +189,106 @@ def get_date_range(preset, time_zone_str="UTC"):
     elif preset == "Last Year":
         return today.replace(year=today.year - 1, month=1, day=1), today.replace(year=today.year - 1, month=12, day=31, hour=23, minute=59, second=59)
     return today, (today + timedelta(days=1)).replace(hour=23, minute=59, second=59)
-def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None, 
-                 product_id=None, manufacuture_name=[], fulfillment_channel=None, 
-                 timezone='UTC'):    
+
+def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
+                 product_id=None, manufacuture_name=[], fulfillment_channel=None,
+                 timezone='UTC'):
+
     if timezone != 'UTC':
         start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone)
+
+    # Normalize inputs
     start_date = start_date.replace(tzinfo=None)
     end_date = end_date.replace(tzinfo=None)
-    pipeline = [{"$project": {"_id": 1, "name": 1, "image_url": 1}}]
-    marketplace_list = list(Marketplace.objects.aggregate(*pipeline))
+
+    # Marketplace names (only needed for final output)
+    marketplace_pipeline = [{"$project": {"_id": 1, "name": 1, "image_url": 1}}]
+    marketplace_list = list(Marketplace.objects.aggregate(*marketplace_pipeline))
+    marketplace_names = {str(m['_id']): m['name'] for m in marketplace_list}
+
+    # Build base match criteria
     match = {
         'order_date': {"$gte": start_date, "$lte": end_date},
         'order_status': {"$nin": ["Canceled", "Cancelled"]},
         'order_total': {"$gt": 0}
     }
+
     if fulfillment_channel:
         match['fulfillment_channel'] = fulfillment_channel
-    if marketplace_id not in [None, "", "all", "custom"]:
+
+    if marketplace_id and marketplace_id not in [None, "", "all", "custom"]:
         match['marketplace_id'] = ObjectId(marketplace_id)
-    if manufacuture_name not in [None, "", []]:
+
+    # Handle filtering via product/brand/manufacturer
+    if manufacuture_name:
         ids = getproductIdListBasedonManufacture(manufacuture_name, start_date, end_date)
         match["_id"] = {"$in": ids}
-    elif product_id not in [None, "", []]:
-        product_id = [ObjectId(pid) for pid in product_id]
-        ids = getOrdersListBasedonProductId(product_id, start_date, end_date)
+    elif product_id:
+        pids = [ObjectId(pid) for pid in product_id]
+        ids = getOrdersListBasedonProductId(pids, start_date, end_date)
         match["_id"] = {"$in": ids}
-    elif brand_id not in [None, "", []]:
-        brand_id = [ObjectId(bid) for bid in brand_id]
-        ids = getproductIdListBasedonbrand(brand_id, start_date, end_date)
+    elif brand_id:
+        bids = [ObjectId(bid) for bid in brand_id]
+        ids = getproductIdListBasedonbrand(bids, start_date, end_date)
         match["_id"] = {"$in": ids}
+
+    # Full aggregation pipeline
     pipeline = [
         {"$match": match},
+        {"$lookup": {
+            "from": "orderitems",
+            "localField": "order_items",
+            "foreignField": "_id",
+            "as": "items"
+        }},
+        {"$addFields": {
+            "item_details": {
+                "$map": {
+                    "input": "$items",
+                    "as": "item",
+                    "in": {
+                        "price": {
+                            "$cond": {
+                                "if": {"$and": [
+                                    {"$ifNull": ["$$item.Pricing.ItemPrice.Amount", None]},
+                                    {"$ne": ["$$item.Pricing.ItemPrice.Amount", ""]}
+                                ]},
+                                "then": {"$toDouble": "$$item.Pricing.ItemPrice.Amount"},
+                                "else": 0.0
+                            }
+                        },
+                        "tax": {
+                            "$cond": {
+                                "if": {"$and": [
+                                    {"$ifNull": ["$$item.Pricing.ItemTax.Amount", None]},
+                                    {"$ne": ["$$item.Pricing.ItemTax.Amount", ""]}
+                                ]},
+                                "then": {"$toDouble": "$$item.Pricing.ItemTax.Amount"},
+                                "else": 0.0
+                            }
+                        }
+                    }
+                }
+            }
+        }},
+        {"$addFields": {
+            "calculated_item_price": {"$sum": "$item_details.price"},
+            "calculated_tax_sum": {"$sum": "$item_details.tax"},
+            "original_order_total": "$order_total",
+            "order_total": {
+                "$subtract": [
+                    "$order_total",
+                    {"$sum": "$item_details.tax"}
+                ]
+            }
+        }},
         {"$project": {
             "_id": 1,
             "order_date": 1,
             "purchase_order_id": 1,
             "order_items": 1,
             "order_total": 1,
+            "original_order_total": 1,
             "order_status": 1,
             "fulfillment_channel": 1,
             "merchant_order_id": 1,
@@ -238,52 +301,31 @@ def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
             "shipping_price": {"$ifNull": ["$shipping_price", 0.0]},
             "merchant_shipment_cost": {"$ifNull": ["$merchant_shipment_cost", 0.0]},
             "items_order_quantity": {"$size": {"$ifNull": ["$order_items", []]}},
+            "marketplace_name": {
+                "$cond": {
+                    "if": {"$in": [{"$toString": "$marketplace_id"}, list(marketplace_names.keys())]},
+                    "then": {
+                        "$arrayElemAt": [
+                            list(marketplace_names.values()),
+                            {"$indexOfArray": [list(marketplace_names.keys()), {"$toString": "$marketplace_id"}]}
+                        ]
+                    },
+                    "else": None
+                }
+            }
         }}
     ]
-    order_list = list(Order.objects.aggregate(*pipeline))
-    all_order_item_ids = []
-    for order_ins in order_list:
-        all_order_item_ids.extend(order_ins['order_items'])
-    order_items_lookup = {}
-    if all_order_item_ids:
-        order_items = OrderItems.objects(id__in=all_order_item_ids)
-        for item in order_items:
-            order_items_lookup[item.id] = item
-    for order_ins in order_list:
-        for marketplace in marketplace_list:
-            order_ins['marketplace_name'] = marketplace['name']
-        tax_sum = 0.0
-        item_price = 0.0
-        for item_id in order_ins['order_items']:
-            item = order_items_lookup.get(item_id)
-            tax = 0.0
-            price = 0.0
-            if not item:
-                continue
-            if hasattr(item, 'Pricing'):
-                if hasattr(item.Pricing, 'ItemPrice') and hasattr(item.Pricing.ItemPrice, 'Amount'):
-                    try:
-                        price = float(item.Pricing.ItemPrice.Amount)
-                    except Exception:
-                        price = 0.0
-                if hasattr(item.Pricing, 'ItemTax') and hasattr(item.Pricing.ItemTax, 'Amount'):
-                    try:
-                        tax = float(item.Pricing.ItemTax.Amount)
-                    except Exception:
-                        tax = 0.0
-            elif hasattr(item, 'charges'):
-                for charge in item.charges:
-                    if hasattr(charge, 'chargeAmount'):
-                        try:
-                            price += float(charge.chargeAmount)
-                        except Exception:
-                            price += 0.0
-            item_price += price
-            tax_sum += tax
-        original_order_total = order_ins.get('order_total', 0.0)
-        order_ins['original_order_total'] = round(item_price, 2)
-        order_ins['order_total'] = round(original_order_total - tax_sum, 2)
-    return order_list
+
+    try:
+        results = list(Order.objects.aggregate(*pipeline))
+        # Round values
+        for r in results:
+            r['original_order_total'] = round(r.get('original_order_total', 0.0), 2)
+            r['order_total'] = round(r.get('order_total', 0.0), 2)
+        return results
+    except Exception as e:
+        print(f"Aggregation error: {e}")
+        return []
 def get_previous_periods(current_start, current_end):
     period_duration = current_end - current_start
     if period_duration.days > 1:
@@ -456,6 +498,7 @@ def create_empty_bucket_data(time_key):
         "current_date": time_key
     }
 from concurrent.futures import ThreadPoolExecutor
+
 def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, product_id=None, 
                   manufacturer_name=None, fulfillment_channel=None, timezone="UTC"):
     user_timezone = pytz.timezone(timezone) if timezone != 'UTC' else pytz.UTC
