@@ -69,10 +69,10 @@ def getMarketplaceList(request):
                                 "case": {"$eq": ["$name", "Amazon"]},
                                 "then": [{"FBA": "AFN"}, {"FBM": "MFN"}]
                             },
-                            {
-                                "case": {"$eq": ["$name", "Walmart"]},
-                                "then": [{"FBM": "SellerFulfilled"}]
-                            }
+                            # {
+                            #     "case": {"$eq": ["$name", "Walmart"]},
+                            #     "then": [{"FBM": "SellerFulfilled"}]
+                            # }
                         ],
                         "default": []  
                     }
