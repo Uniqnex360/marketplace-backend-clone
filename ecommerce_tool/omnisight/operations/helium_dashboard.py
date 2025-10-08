@@ -49,6 +49,36 @@ timezone_str = 'US/Pacific'
 local_tz = pytz.timezone(timezone_str)
 import logging
 logger = logging.getLogger(__name__)
+import time
+import json
+from threading import Lock
+
+class SimpleTimedCache:
+    def __init__(self, ttl_seconds=1728000):  # default: 30 minutes
+        self.store = {}
+        self.ttl = ttl_seconds
+        self.lock = Lock()
+
+    def _is_expired(self, entry):
+        _, saved_time = entry
+        return (time.time() - saved_time) > self.ttl
+
+    def get(self, key):
+        with self.lock:
+            entry = self.store.get(key)
+            if entry and not self._is_expired(entry):
+                return entry[0]
+            elif entry:
+                del self.store[key]
+        return None
+
+    def set(self, key, value):
+        with self.lock:
+            self.store[key] = (value, time.time())
+
+# instantiate a shared cache
+period_data_cache = SimpleTimedCache(ttl_seconds=900)  # cache for 15 minutes
+
 def sanitize_data(data):
     """Recursively sanitize data to ensure all float values are JSON compliant."""
     if isinstance(data, dict):
@@ -1685,7 +1715,10 @@ def getPeriodWiseData(request):
     manufacturer_name = json_request.get('manufacturer_name', [])
     fulfillment_channel = json_request.get('fulfillment_channel', None)
     timezone_str = 'US/Pacific'
-    # cache_key_prefix = 'period_wise_data_' + json.dumps(json_request, sort_keys=True)
+    cache_key = json.dumps(json_request, sort_keys=True)
+    cached = period_data_cache.get(cache_key)
+    if cached:
+        return JsonResponse(cached, safe=False)
     periods = {
         "yesterday": get_date_range("Yesterday", timezone_str),
         "last7Days": get_date_range("Last 7 days", timezone_str),
@@ -1790,6 +1823,7 @@ def getPeriodWiseData(request):
     for key in ordered_keys:
         if key in response_data:
             ordered_response[key]=response_data[key]
+    period_data_cache.set(cache_key, ordered_response)
     return JsonResponse(ordered_response, safe=False)
 
 @csrf_exempt
@@ -3410,7 +3444,7 @@ def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,ma
         "productCategories": product_categories,  
         "productCompleteness": product_completeness  
     }
-    
+ 
 @csrf_exempt
 def getProfitAndLossDetails(request):
     def to_utc_format(dt):
@@ -3446,6 +3480,7 @@ def getProfitAndLossDetails(request):
         to_date = end_date.astimezone(pytz.UTC)
     if not start_date or not end_date:
         from_date, to_date = get_date_range(preset, timezone)
+        
     def pLcalculate_metrics(start_date, end_date, marketplace_id, brand_id, product_id,
                             manufacturer_name, fulfillment_channel, timezone):
         gross_revenue = total_cogs = refund = net_profit = margin = total_units = 0

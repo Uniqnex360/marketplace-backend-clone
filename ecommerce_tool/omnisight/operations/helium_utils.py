@@ -560,17 +560,15 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
         ids = getproductIdListBasedonbrand(brand_id, start_date_utc, end_date_utc)
         match["id__in"] = ids
     orders_by_bucket = {}
+    orders = DatabaseModel.list_documents(Order.objects, match)
+    orders_list = list(orders)
     for dt in time_buckets:
         bucket_start = dt
-        if is_single_day:
-            bucket_end = dt + timedelta(hours=1)
-        else:
-            bucket_end = dt + timedelta(days=1)
-        bucket_match = match.copy()
-        bucket_match['order_date__gte'] = bucket_start
-        bucket_match['order_date__lt'] = bucket_end
-        orders = DatabaseModel.list_documents(Order.objects, bucket_match)
-        orders_by_bucket[dt.strftime(time_format)] = list(orders)
+        bucket_end = dt + timedelta(hours=1) if is_single_day else dt + timedelta(days=1)
+        orders_by_bucket[dt.strftime(time_format)] = [
+        order for order in orders_list 
+        if bucket_start <= order.order_date < bucket_end
+    ]
         
     def process_time_bucket(time_key):
         nonlocal graph_data, orders_by_bucket
