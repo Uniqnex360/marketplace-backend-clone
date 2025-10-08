@@ -154,14 +154,15 @@ WSGI_APPLICATION = 'ecommerce_tool.wsgi.application'
 # MongoDB connection settings for mongoengine
 from mongoengine import connect
 
+
 connect(
     db=os.getenv('DATABASE_NAME'),
-    # username=os.getenv('DATABASE_USER'),
-    # password=os.getenv('DATABASE_PASSWORD'),
     host=os.getenv('DATABASE_HOST'),
-    # alias='default'
+    maxPoolSize=50,          # maximum pooled connections per Gunicorn worker
+    minPoolSize=5,           # keep a few warm connections
+    socketTimeoutMS=60000,   # optional – drops dead sockets instead of hanging
+    connectTimeoutMS=15000   # fail fast if Mongo is unreachable
 )
-
 # Password validation
 # https://docs.djangoproject.com/en/4.2/ref/settings/#auth-password-validators
 
