@@ -5,6 +5,7 @@ from omnisight.operations.core_calculator import EcommerceCalculator
 from mongoengine import Q
 from omnisight.models import OrderItems,Order,Marketplace,Product,CityDetails,user,notes_data,chooseMatrix,Fee,Refund,Brand,inventry_log,productPriceChange
 from mongoengine.queryset.visitor import Q
+from django.utils.dateparse import parse_datetime, parse_date
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dateutil.relativedelta import relativedelta
 from django.views.decorators.csrf import csrf_exempt
@@ -200,36 +201,56 @@ def get_metrics_by_date_range(request):
     #     return cache_obj.result
     # print('cacheobj',cache_obj)
     if start_date_str and end_date_str:
-        start_date_dt=datetime.strptime(start_date_str,"%d/%m/%Y")
-        end_date_dt=datetime.strptime(end_date_str,"%d/%m/%Y").replace(hour=23,minute=59,second=59)
-    else:
-        start_date_dt,end_date_dt=get_date_range(preset,time_zone_str=timezone_str)
-    target_date = datetime.strptime(target_date_str, "%d/%m/%Y").date()
-    
-    current_time = datetime.now(local_tz).replace(year=target_date.year, month=target_date.month, day=target_date.day)
-    target_date = current_time.replace(hour=0, minute=0, second=0, microsecond=0)
-    previous_date = target_date - timedelta(days=1)
-    eight_days_ago = target_date - timedelta(days=8)
-    if preset=='Today' or target_date_str:
-        targeted_start=local_tz.localize(datetime.combine(target_date,datetime.min.time()))
-        targeted_end_date=targeted_start.replace(hour=23,minute=59,second=59)
-        previous_start=targeted_start-timedelta(days=1)
-        previous_end=targeted_end_date-timedelta(days=1)
-    else:
-        targeted_start=start_date_dt
-        targeted_end_date=end_date_dt
-        previous_start=start_date_dt-timedelta(days=1)
-        previous_end=targeted_end_date-timedelta(days=1)
-    date_filters = {
-        "targeted": {
-            "start": targeted_start,
-            "end": targeted_end_date
-        },
-        "previous": {
-            "start": previous_start,
-            "end": previous_end
+        # parse strings -> datetime
+        start_date_dt = datetime.strptime(start_date_str, "%d/%m/%Y")
+        end_date_dt = datetime.strptime(end_date_str, "%d/%m/%Y").replace(hour=23, minute=59, second=59)
+
+        # localize to timezone
+        start_date_dt = local_tz.localize(start_date_dt)
+        end_date_dt = local_tz.localize(end_date_dt)
+
+        from_date = start_date_dt
+        to_date = end_date_dt
+
+        # previous period (same length immediately before)
+        duration = to_date - from_date
+        prev_from = from_date - duration
+        prev_to = to_date - duration
+
+        date_filters = {
+            "targeted": {"start": from_date, "end": to_date},
+            "previous": {"start": prev_from, "end": prev_to},
         }
-    }
+
+    # ------------------------------------------------------------
+    # 2️⃣  Target‑date / preset mode (no custom dates)
+    # ------------------------------------------------------------
+    elif target_date_str:
+        target_date = datetime.strptime(target_date_str, "%d/%m/%Y").date()
+        current_time = datetime.now(local_tz).replace(year=target_date.year,
+                                                      month=target_date.month,
+                                                      day=target_date.day)
+        target_start = local_tz.localize(datetime.combine(target_date, datetime.min.time()))
+        target_end = target_start.replace(hour=23, minute=59, second=59)
+        previous_start = target_start - timedelta(days=1)
+        previous_end = target_end - timedelta(days=1)
+
+        date_filters = {
+            "targeted": {"start": target_start, "end": target_end},
+            "previous": {"start": previous_start, "end": previous_end},
+        }
+
+    else:
+        # fall back to preset logic (Today, Last 7 days, etc.)
+        from_date, to_date = get_date_range(preset, timezone_str)
+        duration = to_date - from_date
+        prev_from = from_date - duration
+        prev_to = to_date - duration
+
+        date_filters = {
+            "targeted": {"start": from_date, "end": to_date},
+            "previous": {"start": prev_from, "end": prev_to},
+        }
     if start_date_str and end_date_str:
         graph_days_filter = {}
         current_day = start_date_dt
@@ -1909,11 +1930,11 @@ def exportPeriodWiseCSV(request):
     writer.writerow(headers)
     writer.writerows(period_rows)
     return response
-
 @csrf_exempt
 def getPeriodWiseDataCustom(request):
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
     brand_id = json_request.get('brand_id', [])
@@ -1924,31 +1945,62 @@ def getPeriodWiseDataCustom(request):
     preset = json_request.get("preset")
     start_date = json_request.get("start_date")
     end_date = json_request.get("end_date")
+
     local_tz = pytz.timezone(timezone_str)
-    if preset=='Today':
-        start_date = datetime.strptime("25/09/2025", "%d/%m/%Y")
-        start_date=local_tz.localize(start_date)
-        end_date=start_date.replace(hour=23,minute=59,second=59)
-    if start_date:
-        
-        naive_from_date = start_date
-        naive_to_date = end_date
-        localized_from_date = safe_localize(start_date,local_tz)
-        localized_to_date = safe_localize(end_date.replace(hour=23,minute=59,second=59),local_tz)
-        from_date = start_date.astimezone(pytz.UTC)
-        to_date = end_date.astimezone(pytz.UTC)
+
+    # ------------------------------------------------------------
+    # 🧩 New: If preset is 'Today', fix the date to a particular day
+    # ------------------------------------------------------------
+    if preset == 'Today':
+        # You can change this fixed day as needed:
+        fixed_day = "25/09/2025"
+        naive_from_date = datetime.strptime(fixed_day, "%d/%m/%Y")
+        naive_to_date = naive_from_date
+        localized_from_date = local_tz.localize(naive_from_date)
+        localized_to_date = local_tz.localize(
+            naive_to_date.replace(hour=23, minute=59, second=59)
+        )
+        from_date = localized_from_date.astimezone(pytz.UTC)
+        to_date = localized_to_date.astimezone(pytz.UTC)
+
+    # ------------------------------------------------------------
+    # 🧩 Otherwise, behave exactly the same as before
+    # ------------------------------------------------------------
+    elif start_date:
+        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
+        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
+        localized_from_date = local_tz.localize(naive_from_date)
+        localized_to_date = local_tz.localize(
+            naive_to_date.replace(hour=23, minute=59, second=59)
+        )
+        from_date = localized_from_date.astimezone(pytz.UTC)
+        to_date = localized_to_date.astimezone(pytz.UTC)
     else:
         from_date, to_date = get_date_range(preset, timezone_str)
+
+    # ------------------------------------------------------------
+    # The rest (unchanged from your working version)
+    # ------------------------------------------------------------
     duration = to_date - from_date
     prev_from, prev_to = from_date - duration, to_date - duration
+
     today_start, today_end = get_date_range("Today", timezone_str)
     yesterday_start, yesterday_end = get_date_range("Yesterday", timezone_str)
     last7_start, last7_end = get_date_range("Last 7 days", timezone_str)
+
     last7_prev_start = today_start - timedelta(days=14)
     last7_prev_end = last7_start - timedelta(seconds=1)
+
     day_before_yesterday_start = yesterday_start - timedelta(days=1)
     day_before_yesterday_end = yesterday_end - timedelta(days=1)
+
     def format_metrics_response(current, previous):
+        def sanitize_data(val):
+            try:
+                return float(val or 0)
+            except Exception:
+                return 0.0
+
         def format_metric(metric):
             current_value = sanitize_data(current.get(metric, 0))
             previous_value = sanitize_data(previous.get(metric, 0))
@@ -1958,11 +2010,13 @@ def getPeriodWiseDataCustom(request):
                 "previous": previous_value,
                 "delta": delta
             }
+
         summary_metrics = [
             "grossRevenue", "netProfit", "expenses", "unitsSold", "refunds", "skuCount",
             "sessions", "pageViews", "unitSessionPercentage", "margin", "roi", "orders"
         ]
         summary = {metric: format_metric(metric) for metric in summary_metrics}
+
         def net_profit_calc(metrics):
             return {
                 "gross": sanitize_data(metrics.get("grossRevenue", 0)),
@@ -1978,6 +2032,7 @@ def getPeriodWiseDataCustom(request):
                 "product_cost": sanitize_data(metrics.get("product_cost", 0)),
                 "shipping_cost": sanitize_data(metrics.get("shipping_cost", 0)),
             }
+
         return {
             "summary": summary,
             "netProfitCalculation": {
@@ -1985,68 +2040,82 @@ def getPeriodWiseDataCustom(request):
                 "previous": net_profit_calc(previous),
             }
         }
+
     def to_local_date_string(dt, tz_str):
         local_tz = pytz.timezone(tz_str)
         return dt.astimezone(local_tz).strftime("%Y-%m-%d")
+
     def create_period_response(label, cur_from, cur_to, prev_from, prev_to, current_metrics, previous_metrics):
         date_ranges = {
-            "current": {"from": to_utc_format(cur_from), "to": to_utc_format(cur_to),"from_local":to_local_date_string(cur_from,timezone_str),'to_local':to_local_date_string(cur_to,timezone_str)},
-            "previous": {"from": to_utc_format(prev_from), "to": to_utc_format(prev_to,),"from_local":to_local_date_string(prev_from,timezone_str),'to_local':to_local_date_string(prev_to,timezone_str)}
+            "current": {
+                "from": to_utc_format(cur_from),
+                "to": to_utc_format(cur_to),
+                "from_local": to_local_date_string(cur_from, timezone_str),
+                "to_local": to_local_date_string(cur_to, timezone_str)
+            },
+            "previous": {
+                "from": to_utc_format(prev_from),
+                "to": to_utc_format(prev_to),
+                "from_local": to_local_date_string(prev_from, timezone_str),
+                "to_local": to_local_date_string(prev_to, timezone_str)
+            }
         }
         metrics_response = format_metrics_response(current_metrics, previous_metrics)
         return {
             "dateRanges": date_ranges,
-            **metrics_response  
+            **metrics_response
         }
+
     with ThreadPoolExecutor(max_workers=8) as executor:
         future_today_current = executor.submit(
-            calculate_metricss, 
-            today_start, today_end, 
+            calculate_metricss,
+            today_start, today_end,
             marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
             timezone_str
         )
         future_today_previous = executor.submit(
-            calculate_metricss, 
-            yesterday_start, yesterday_end, 
+            calculate_metricss,
+            yesterday_start, yesterday_end,
             marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
             timezone_str, False, True
         )
         future_yesterday_current = executor.submit(
-            calculate_metricss, 
-            yesterday_start, yesterday_end, 
+            calculate_metricss,
+            yesterday_start, yesterday_end,
             marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
             timezone_str, False, True
         )
         future_yesterday_previous = executor.submit(
-            calculate_metricss, 
-            day_before_yesterday_start, day_before_yesterday_end, 
+            calculate_metricss,
+            day_before_yesterday_start, day_before_yesterday_end,
             marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
             timezone_str, False, True
         )
         future_last7_current = executor.submit(
-            calculate_metricss, 
-            last7_start, last7_end, 
+            calculate_metricss,
+            last7_start, last7_end,
             marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
             timezone_str, False, True
         )
         future_last7_previous = executor.submit(
-            calculate_metricss, 
-            last7_prev_start, last7_prev_end, 
+            calculate_metricss,
+            last7_prev_start, last7_prev_end,
             marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
             timezone_str, False, True
         )
         future_custom_current = executor.submit(
-            calculate_metricss, 
-            from_date, to_date, 
+            calculate_metricss,
+            from_date, to_date,
             marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
             timezone_str, False, True
         )
         future_custom_previous = executor.submit(
-            calculate_metricss, 
-            prev_from, prev_to, 
+            calculate_metricss,
+            prev_from, prev_to,
             marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
             timezone_str, False, True
         )
+
         today_current = future_today_current.result()
         today_previous = future_today_previous.result()
         yesterday_current = future_yesterday_current.result()
@@ -2055,13 +2124,14 @@ def getPeriodWiseDataCustom(request):
         last7_previous = future_last7_previous.result()
         custom_current = future_custom_current.result()
         custom_previous = future_custom_previous.result()
+
     response_data = {
         "today": create_period_response(
             "Today", today_start, today_end, yesterday_start, yesterday_end,
             today_current, today_previous
         ),
         "yesterday": create_period_response(
-            "Yesterday", yesterday_start, yesterday_end, 
+            "Yesterday", yesterday_start, yesterday_end,
             day_before_yesterday_start, day_before_yesterday_end,
             yesterday_current, yesterday_previous
         ),
@@ -2180,7 +2250,7 @@ def allMarketplaceData(request):
                     promotion_discount+=float(item_data.get('promotion_discount',0) or 0)
                     ship_promotion_discount+=float(item_data.get('ship_promotion_discount',0) or 0)
                     referral_fee_total += referral_fee*quantity
-                    tax_price += item_data['tax_price']
+                    tax_price += item_data.get('tax_price', 0)
                     product_cost = float(item_data.get('product_cost', 0) or 0)
                     total_cogs += product_cost * quantity
                     total_units+=quantity
@@ -2292,7 +2362,7 @@ def allMarketplaceData(request):
                 total_units+=quantity
                 referral_fee = float(item_data.get('referral_fee', 0) or 0)
                 referral_fee_total += referral_fee*quantity
-                tax_price += item_data['tax_price']
+                tax_price += item_data.get('tax_price',0)
                 marketplace_name = order.get("marketplace_name", "Amazon")
                 total_cogs+=product_cost*quantity
                 vendor_funding += item_data['vendor_funding']*quantity
@@ -3366,15 +3436,15 @@ def getProfitAndLossDetails(request):
     elif start_date and end_date:
         if isinstance(start_date,str):
             start_date = datetime.strptime(start_date, "%Y-%m-%d")
-        if isinstance(start_date,str):
+        if isinstance(end_date,str):
             end_date = datetime.strptime(end_date, "%Y-%m-%d")
         if start_date.tzinfo is None:
             start_date=local_tz.localize(start_date)
         if end_date.tzinfo is None:
             end_date=local_tz.localize(end_date.replace(hour=23,minute=59,second=59))
-    # if start_date:
-    #     from_date, to_date = convertdateTotimezone(start_date, end_date, timezone)
-    else:       
+        from_date = start_date.astimezone(pytz.UTC)
+        to_date = end_date.astimezone(pytz.UTC)
+    if not start_date or not end_date:
         from_date, to_date = get_date_range(preset, timezone)
     def pLcalculate_metrics(start_date, end_date, marketplace_id, brand_id, product_id,
                             manufacturer_name, fulfillment_channel, timezone):
@@ -3429,7 +3499,7 @@ def getProfitAndLossDetails(request):
                 if price == 0 and 'charges' in item_data:
                     price = sum(float(charge.get('chargeAmount',0)) for charge in item_data['charges'])
                 temp_price += price
-                tax_price += item_data['tax_price']
+                tax_price += item_data.get('tax_price', 0)
                 product_cost = float(item_data.get('product_cost', 0) or 0.0)
                 quantity = int(item_data.get('QuantityOrdered', 0) or 0)
                 total_cogs += product_cost * quantity
@@ -3576,12 +3646,14 @@ def profit_loss_chart(request):
     elif start_date and end_date:
         if isinstance(start_date,str):
             start_date = datetime.strptime(start_date, "%Y-%m-%d")
-        if isinstance(start_date,str):
+        if isinstance(end_date,str):
             end_date = datetime.strptime(end_date, "%Y-%m-%d")
         if start_date.tzinfo is None:
             start_date=local_tz.localize(start_date)
         if end_date.tzinfo is None:
             end_date=local_tz.localize(end_date.replace(hour=23,minute=59,second=59))
+        from_date = start_date.astimezone(pytz.UTC)
+        to_date = end_date.astimezone(pytz.UTC)
     # if start_date:
     #     from_date, to_date = convertdateTotimezone(start_date, end_date, timezone)
     else:       
@@ -3856,10 +3928,21 @@ def profit_loss_chart(request):
     
     return JsonResponse({"graph": graph}, safe=False)
 def safe_localize(dt, tz):
-    if dt.tzinfo is None:  # it's naive
-        return tz.localize(dt)
-    return dt  # already timezone-aware
+    from datetime import datetime
+    import pytz
 
+    if isinstance(dt, str):
+        from django.utils.dateparse import parse_datetime, parse_date
+        parsed = parse_datetime(dt) or parse_date(dt)
+        if parsed and not isinstance(parsed, datetime):
+            parsed = datetime.combine(parsed, datetime.min.time())
+        dt = parsed
+
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return tz.localize(dt)
+    return dt
 @csrf_exempt
 def profitLossExportXl(request):
     json_request = JSONParser().parse(request)
