@@ -17,6 +17,7 @@ class Marketplace(Document):
     image_url = StringField()  # Marketplace logo URL
     created_at = StringField()  # Timestamp when the marketplace was added
     updated_at = StringField()  # Timestamp when the marketplace was last updated
+    country = ListField(StringField())
 class Category(Document):
     name = StringField(required=True)  # Category name
     parent_category_id = ReferenceField('self', null=True)  # Parent category (if applicable)
@@ -233,6 +234,7 @@ class OrderStatus(EmbeddedDocument):
     STATUS_CHOICES = ("Pending", "Shipped", "Delivered", "Canceled", "Returned")
     Status = StringField(required=True)
     StatusDate = DateTimeField(required=True)
+    
 class TaxCollection(EmbeddedDocument):
     Model = StringField(required=True)
     ResponsibleParty = StringField(required=True)
@@ -264,12 +266,15 @@ class OrderItems(Document):
             ['created_date', 'ProductDetails.product_id']
         ]
     }
+    
 class Order(Document):
     # Tracking IDs
     purchase_order_id = StringField()  # ID generated after a customer orders a product
     customer_order_id = StringField()  # ID from the customer's perspective for tracking
     seller_order_id = StringField()  # ID used by the seller for internal purposes
     merchant_order_id = StringField()  # ID used by the merchant for internal purposes
+    geo = StringField()  # Geographic region (US, UK, etc.)
+    channel = StringField() 
     shipstation_id=StringField()
     shipstation_synced=BooleanField(default=False)
     shipstation_sync_date=DateTimeField()
