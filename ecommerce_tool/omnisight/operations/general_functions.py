@@ -907,8 +907,6 @@ def ordersCountForDashboard(request):
     start_date = request.GET.get('start_date')
     end_date = request.GET.get('end_date')
     preset = request.GET.get("preset", "Today")
-    timezone_str='US/Pacific'
-    local_tz = pytz.timezone(timezone_str)
     brand_ids = []
     array_brand_ids = request.GET.getlist('brand_id[]')
     if array_brand_ids:
@@ -925,15 +923,10 @@ def ordersCountForDashboard(request):
     else:
         product_ids = None
     timezone_str = "US/Pacific"
-    if preset=='Today':
-        start_date = datetime.strptime("25/09/2025", "%d/%m/%Y")
-        start_date=local_tz.localize(start_date)
-        end_date=start_date.replace(hour=23,minute=59,second=59)
+    if start_date:
+        start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
     else:
-        if start_date not in [None, ""]:
-            start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
-        else:
-            start_date, end_date = get_date_range(preset, timezone_str)
+        start_date, end_date = get_date_range(preset, timezone_str)
     if timezone_str != 'UTC':
         start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
     match_conditions = {
