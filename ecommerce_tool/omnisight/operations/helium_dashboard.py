@@ -209,6 +209,7 @@ def sanitize_data(data):
 # load_baseline_data()
 
 @csrf_exempt
+@redis_cache(timeout=3600,key_prefix='get_metrics_by_date_range')
 def get_metrics_by_date_range(request):
     json_request = JSONParser().parse(request)
     
@@ -750,7 +751,7 @@ def RevenueWidgetAPIView(request):
     return data
 
 @csrf_exempt
-@redis_cache(timeout=900,key_prefix='updatedRevenueWidgetAPIView')
+@redis_cache(timeout=3600,key_prefix='updatedRevenueWidgetAPIView')
 def updatedRevenueWidgetAPIView(request):
     json_request = JSONParser().parse(request)
     preset = json_request.get("preset", "Today")
@@ -1706,7 +1707,7 @@ def clean_json_floats(obj):
     return obj
 
 @csrf_exempt
-@redis_cache(timeout=900,key_prefix='getPeriodWiseData')
+@redis_cache(timeout=3600,key_prefix='getPeriodWiseData')
 def getPeriodWiseData(request):
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -2354,12 +2355,12 @@ def allMarketplaceData(request):
             marketplace_metrics[marketplace_name]["currency_list"].append(currency_data)
         return [
             {
-                "image": (
-                    "https://i.pinimg.com/originals/01/ca/da/01cada77a0a7d326d85b7969fe26a728.jpg"
-                    if mp == "Amazon" else
-                    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRzjtf8dzq48TtkzeRYx2-_li3gTCkstX2juA&s"
-                    if mp == "Walmart" else ""
-                ),
+                # "image": (
+                #     "https://i.pinimg.com/originals/01/ca/da/01cada77a0a7d326d85b7969fe26a728.jpg"
+                #     if mp == "Amazon" else
+                #     "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRzjtf8dzq48TtkzeRYx2-_li3gTCkstX2juA&s"
+                #     if mp == "Walmart" else ""
+                # ),
                 "marketplace": mp,
                 "currency_list": data["currency_list"]
             }
@@ -2800,7 +2801,7 @@ def sales(orders):
     return sorted_skus
 
 @csrf_exempt
-@redis_cache(timeout=900,key_prefix='getProductPerformanceSummary')
+@redis_cache(timeout=3600,key_prefix='getProductPerformanceSummary')
 def getProductPerformanceSummary(request):
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
@@ -3471,21 +3472,13 @@ def getProfitAndLossDetails(request):
         start_date = datetime.strptime("25/09/2025", "%d/%m/%Y")
         start_date=local_tz.localize(start_date)
         end_date=start_date.replace(hour=23,minute=59,second=59)
-        from_date = start_date.astimezone(pytz.UTC)  
-        to_date = end_date.astimezone(pytz.UTC) 
-    elif start_date and end_date:
-        if isinstance(start_date,str):
-            start_date = datetime.strptime(start_date, "%Y-%m-%d")
-        if isinstance(end_date,str):
-            end_date = datetime.strptime(end_date, "%Y-%m-%d")
-        if start_date.tzinfo is None:
-            start_date=local_tz.localize(start_date)
-        if end_date.tzinfo is None:
-            end_date=local_tz.localize(end_date.replace(hour=23,minute=59,second=59))
-        from_date = start_date.astimezone(pytz.UTC)
-        to_date = end_date.astimezone(pytz.UTC)
-    if not start_date or not end_date:
-        from_date, to_date = get_date_range(preset, timezone)
+        from_date=start_date
+        to_date=end_date
+    else:
+        if start_date not in [None, ""]:
+            from_date, to_date = convertdateTotimezone(start_date, end_date, timezone_str)
+        else:
+            from_date, to_date = get_date_range(preset, timezone_str)
         
     def pLcalculate_metrics(start_date, end_date, marketplace_id, brand_id, product_id,
                             manufacturer_name, fulfillment_channel, timezone):
