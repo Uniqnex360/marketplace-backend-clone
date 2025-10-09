@@ -335,7 +335,7 @@ class Order(Document):
             ['order_date', 'marketplace_id'],
             ['order_date', 'fulfillment_channel'],
             ['marketplace_id', 'order_date', 'fulfillment_channel'],
-            'purchase_order_id',
+            'purchase_order_id',    
             'order_items'  # For $lookup operations
         ]
     }

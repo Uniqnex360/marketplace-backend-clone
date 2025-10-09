@@ -1,5 +1,6 @@
 from __future__ import annotations
 import pandas as pd
+from omnisight.decorators import redis_cache
 from omnisight.operations.core_calculator import EcommerceCalculator
 # from omnisight.decorators import redis_cache
 from mongoengine import Q
@@ -1704,7 +1705,7 @@ def clean_json_floats(obj):
     return obj
 
 @csrf_exempt
-# @redis_cache(timeout=900,key_prefix='getPeriodWiseData')
+@redis_cache(timeout=900,key_prefix='getPeriodWiseData')
 def getPeriodWiseData(request):
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -2798,6 +2799,7 @@ def sales(orders):
     return sorted_skus
 
 @csrf_exempt
+@redis_cache(timeout=900,key_prefix='getProductPerformanceSummary')
 def getProductPerformanceSummary(request):
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
