@@ -725,16 +725,10 @@ def updatedRevenueWidgetAPIView(request):
     timezone_str = "US/Pacific"
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
-    local_tz = pytz.timezone(timezone_str)
-    if preset=='Today':
-        start_date = datetime.strptime("25/09/2025", "%d/%m/%Y")
-        start_date=local_tz.localize(start_date)
-        end_date=start_date.replace(hour=23,minute=59,second=59)
+    if start_date not in [None, ""]:
+        start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
     else:
-        if start_date not in [None, ""]:
-            start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
-        else:
-            start_date, end_date = get_date_range(preset, timezone_str)
+        start_date, end_date = get_date_range(preset, timezone_str)
     compare_enabled = compare_startdate not in [None, ""]
     if compare_enabled:
         compare_startdate = datetime.strptime(compare_startdate, "%Y-%m-%d").replace(
