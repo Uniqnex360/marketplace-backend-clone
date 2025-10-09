@@ -212,7 +212,6 @@ def sanitize_data(data):
 @redis_cache(timeout=3600,key_prefix='get_metrics_by_date_range')
 def get_metrics_by_date_range(request):
     json_request = JSONParser().parse(request)
-    
     marketplace_id = json_request.get('marketplace_id', None)
     target_date_str = json_request.get('target_date')
     brand_id = json_request.get('brand_id', None)
@@ -220,69 +219,30 @@ def get_metrics_by_date_range(request):
     manufacturer_name = json_request.get('manufacturer_name', [])
     fulfillment_channel = json_request.get('fulfillment_channel', None)
     timezone_str="US/Pacific"
-    local_tz = pytz.timezone(timezone_str)
     preset=json_request.get('preset','Today')
     start_date_str=json_request.get("start_date",None)
     end_date_str=json_request.get('end_date',None)
-    # cache_key=generate_cache_key('get_metrics_by_date_range',json_request)
-    # print('cache_key',cache_key)
-    # cache_obj=EndPointCache.objects(endpoint_name="get_metrics_by_date_range").first()
-    # print(f"got the cache{cache_obj}")
-    # if cache_obj:
-    #     logger.info(f"Database fallback cache hit for {cache_key}")
-    #     return cache_obj.result
-    # print('cacheobj',cache_obj)
     if start_date_str and end_date_str:
-        # parse strings -> datetime
-        start_date_dt = datetime.strptime(start_date_str, "%d/%m/%Y")
-        end_date_dt = datetime.strptime(end_date_str, "%d/%m/%Y").replace(hour=23, minute=59, second=59)
-
-        # localize to timezone
-        start_date_dt = local_tz.localize(start_date_dt)
-        end_date_dt = local_tz.localize(end_date_dt)
-
-        from_date = start_date_dt
-        to_date = end_date_dt
-
-        # previous period (same length immediately before)
-        duration = to_date - from_date
-        prev_from = from_date - duration
-        prev_to = to_date - duration
-
-        date_filters = {
-            "targeted": {"start": from_date, "end": to_date},
-            "previous": {"start": prev_from, "end": prev_to},
-        }
-
-    # ------------------------------------------------------------
-    # 2️⃣  Target‑date / preset mode (no custom dates)
-    # ------------------------------------------------------------
-    elif target_date_str:
-        target_date = datetime.strptime(target_date_str, "%d/%m/%Y").date()
-        current_time = datetime.now(local_tz).replace(year=target_date.year,
-                                                      month=target_date.month,
-                                                      day=target_date.day)
-        target_start = local_tz.localize(datetime.combine(target_date, datetime.min.time()))
-        target_end = target_start.replace(hour=23, minute=59, second=59)
-        previous_start = target_start - timedelta(days=1)
-        previous_end = target_end - timedelta(days=1)
-
-        date_filters = {
-            "targeted": {"start": target_start, "end": target_end},
-            "previous": {"start": previous_start, "end": previous_end},
-        }
-
+        start_date_dt=datetime.strptime(start_date_str,"%d/%m/%Y")
+        end_date_dt=datetime.strptime(end_date_str,"%d/%m/%Y").replace(hour=23,minute=59,second=59)
     else:
-        # fall back to preset logic (Today, Last 7 days, etc.)
-        from_date, to_date = get_date_range(preset, timezone_str)
-        duration = to_date - from_date
-        prev_from = from_date - duration
-        prev_to = to_date - duration
-
-        date_filters = {
-            "targeted": {"start": from_date, "end": to_date},
-            "previous": {"start": prev_from, "end": prev_to},
+        start_date_dt,end_date_dt=get_date_range(preset,time_zone_str=timezone_str)
+    target_date = datetime.strptime(target_date_str, "%d/%m/%Y").date()
+    local_tz = pytz.timezone(timezone_str)
+    current_time = datetime.now(local_tz).replace(year=target_date.year, month=target_date.month, day=target_date.day)
+    target_date = current_time.replace(hour=0, minute=0, second=0, microsecond=0)
+    previous_date = target_date - timedelta(days=1)
+    eight_days_ago = target_date - timedelta(days=8)
+    date_filters = {
+        "targeted": {
+            "start": start_date_dt,
+            "end": end_date_dt
+        },
+        "previous": {
+            "start": start_date_dt-timedelta(days=1),
+            "end": end_date_dt-timedelta(days=1)
         }
+    }
     if start_date_str and end_date_str:
         graph_days_filter = {}
         current_day = start_date_dt
@@ -887,26 +847,17 @@ def get_top_products(request):
     start_date_str = json_request.get("start_date", None)
     end_date_str = json_request.get("end_date", None)
     timezone_str = "US/Pacific"
-    if preset=='Today':
-        start_date_str = datetime.strptime("25/09/2025", "%d/%m/%Y")
-        start_date_str=local_tz.localize(start_date_str)
-        end_date_str=start_date_str.replace(hour=23,minute=59,second=59)
-        start_date = start_date_str.astimezone(pytz.UTC)  
-        end_date = end_date_str.astimezone(pytz.UTC) 
-    elif start_date_str and end_date_str:
-        if isinstance(start_date_str,str):
-            start_date_str = datetime.strptime(start_date_str, "%Y-%m-%d")
-        if isinstance(start_date_str,str):
-            end_date_str = datetime.strptime(end_date_str, "%Y-%m-%d")
-        if start_date_str.tzinfo is None:
-            start_date_str=local_tz.localize(start_date_str)
-        if end_date_str.tzinfo is None:
-            end_date_str=local_tz.localize(end_date_str.replace(hour=23,minute=59,second=59))
-    # if start_date:
-    #     from_date, to_date = convertdateTotimezone(start_date, end_date, timezone)
-    else:       
-        start_date, end_date = get_date_range(preset, timezone) 
-    duration_hours = (end_date - start_date_str).total_seconds() / 3600
+    if start_date_str and end_date_str:
+        local_tz = pytz.timezone(timezone_str)
+        naive_from_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+        naive_to_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+        localized_from_date = local_tz.localize(naive_from_date)
+        localized_to_date = local_tz.localize(naive_to_date).replace(hour=23, minute=59, second=59)
+        start_date = localized_from_date.astimezone(pytz.UTC)
+        end_date = localized_to_date.astimezone(pytz.UTC)
+    else:
+        start_date, end_date = get_date_range(preset, timezone_str)  
+    duration_hours = (end_date - start_date).total_seconds() / 3600
     if duration_hours <= 24:
         chart_date_format = "%Y-%m-%d %H:00:00+00:00"
     else:
@@ -1971,7 +1922,6 @@ def exportPeriodWiseCSV(request):
 def getPeriodWiseDataCustom(request):
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
     brand_id = json_request.get('brand_id', [])
@@ -1982,62 +1932,26 @@ def getPeriodWiseDataCustom(request):
     preset = json_request.get("preset")
     start_date = json_request.get("start_date")
     end_date = json_request.get("end_date")
-
-    local_tz = pytz.timezone(timezone_str)
-
-    # ------------------------------------------------------------
-    # 🧩 New: If preset is 'Today', fix the date to a particular day
-    # ------------------------------------------------------------
-    if preset == 'Today':
-        # You can change this fixed day as needed:
-        fixed_day = "25/09/2025"
-        naive_from_date = datetime.strptime(fixed_day, "%d/%m/%Y")
-        naive_to_date = naive_from_date
-        localized_from_date = local_tz.localize(naive_from_date)
-        localized_to_date = local_tz.localize(
-            naive_to_date.replace(hour=23, minute=59, second=59)
-        )
-        from_date = localized_from_date.astimezone(pytz.UTC)
-        to_date = localized_to_date.astimezone(pytz.UTC)
-
-    # ------------------------------------------------------------
-    # 🧩 Otherwise, behave exactly the same as before
-    # ------------------------------------------------------------
-    elif start_date:
+    if start_date:
+        local_tz = pytz.timezone(timezone_str)
         naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
         naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
         localized_from_date = local_tz.localize(naive_from_date)
-        localized_to_date = local_tz.localize(
-            naive_to_date.replace(hour=23, minute=59, second=59)
-        )
+        localized_to_date = local_tz.localize(naive_to_date.replace(hour=23, minute=59, second=59))  
         from_date = localized_from_date.astimezone(pytz.UTC)
         to_date = localized_to_date.astimezone(pytz.UTC)
     else:
         from_date, to_date = get_date_range(preset, timezone_str)
-
-    # ------------------------------------------------------------
-    # The rest (unchanged from your working version)
-    # ------------------------------------------------------------
     duration = to_date - from_date
     prev_from, prev_to = from_date - duration, to_date - duration
-
     today_start, today_end = get_date_range("Today", timezone_str)
     yesterday_start, yesterday_end = get_date_range("Yesterday", timezone_str)
     last7_start, last7_end = get_date_range("Last 7 days", timezone_str)
-
     last7_prev_start = today_start - timedelta(days=14)
     last7_prev_end = last7_start - timedelta(seconds=1)
-
     day_before_yesterday_start = yesterday_start - timedelta(days=1)
     day_before_yesterday_end = yesterday_end - timedelta(days=1)
-
     def format_metrics_response(current, previous):
-        def sanitize_data(val):
-            try:
-                return float(val or 0)
-            except Exception:
-                return 0.0
-
         def format_metric(metric):
             current_value = sanitize_data(current.get(metric, 0))
             previous_value = sanitize_data(previous.get(metric, 0))
@@ -2047,13 +1961,11 @@ def getPeriodWiseDataCustom(request):
                 "previous": previous_value,
                 "delta": delta
             }
-
         summary_metrics = [
             "grossRevenue", "netProfit", "expenses", "unitsSold", "refunds", "skuCount",
             "sessions", "pageViews", "unitSessionPercentage", "margin", "roi", "orders"
         ]
         summary = {metric: format_metric(metric) for metric in summary_metrics}
-
         def net_profit_calc(metrics):
             return {
                 "gross": sanitize_data(metrics.get("grossRevenue", 0)),
@@ -2069,7 +1981,6 @@ def getPeriodWiseDataCustom(request):
                 "product_cost": sanitize_data(metrics.get("product_cost", 0)),
                 "shipping_cost": sanitize_data(metrics.get("shipping_cost", 0)),
             }
-
         return {
             "summary": summary,
             "netProfitCalculation": {
@@ -2077,82 +1988,68 @@ def getPeriodWiseDataCustom(request):
                 "previous": net_profit_calc(previous),
             }
         }
-
     def to_local_date_string(dt, tz_str):
         local_tz = pytz.timezone(tz_str)
         return dt.astimezone(local_tz).strftime("%Y-%m-%d")
-
     def create_period_response(label, cur_from, cur_to, prev_from, prev_to, current_metrics, previous_metrics):
         date_ranges = {
-            "current": {
-                "from": to_utc_format(cur_from),
-                "to": to_utc_format(cur_to),
-                "from_local": to_local_date_string(cur_from, timezone_str),
-                "to_local": to_local_date_string(cur_to, timezone_str)
-            },
-            "previous": {
-                "from": to_utc_format(prev_from),
-                "to": to_utc_format(prev_to),
-                "from_local": to_local_date_string(prev_from, timezone_str),
-                "to_local": to_local_date_string(prev_to, timezone_str)
-            }
+            "current": {"from": to_utc_format(cur_from), "to": to_utc_format(cur_to),"from_local":to_local_date_string(cur_from,timezone_str),'to_local':to_local_date_string(cur_to,timezone_str)},
+            "previous": {"from": to_utc_format(prev_from), "to": to_utc_format(prev_to,),"from_local":to_local_date_string(prev_from,timezone_str),'to_local':to_local_date_string(prev_to,timezone_str)}
         }
         metrics_response = format_metrics_response(current_metrics, previous_metrics)
         return {
             "dateRanges": date_ranges,
-            **metrics_response
+            **metrics_response  
         }
-
     with ThreadPoolExecutor(max_workers=8) as executor:
         future_today_current = executor.submit(
-            calculate_metricss,
-            today_start, today_end,
+            calculate_metricss, 
+            today_start, today_end, 
             marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
             timezone_str
         )
         future_today_previous = executor.submit(
-            calculate_metricss,
-            yesterday_start, yesterday_end,
+            calculate_metricss, 
+            yesterday_start, yesterday_end, 
             marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
             timezone_str, False, True
         )
         future_yesterday_current = executor.submit(
-            calculate_metricss,
-            yesterday_start, yesterday_end,
+            calculate_metricss, 
+            yesterday_start, yesterday_end, 
             marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
             timezone_str, False, True
         )
         future_yesterday_previous = executor.submit(
-            calculate_metricss,
-            day_before_yesterday_start, day_before_yesterday_end,
+            calculate_metricss, 
+            day_before_yesterday_start, day_before_yesterday_end, 
             marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
             timezone_str, False, True
         )
         future_last7_current = executor.submit(
-            calculate_metricss,
-            last7_start, last7_end,
+            calculate_metricss, 
+            last7_start, last7_end, 
             marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
             timezone_str, False, True
         )
         future_last7_previous = executor.submit(
-            calculate_metricss,
-            last7_prev_start, last7_prev_end,
+            calculate_metricss, 
+            last7_prev_start, last7_prev_end, 
             marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
             timezone_str, False, True
         )
         future_custom_current = executor.submit(
-            calculate_metricss,
-            from_date, to_date,
+            calculate_metricss, 
+            from_date, to_date, 
             marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
             timezone_str, False, True
         )
         future_custom_previous = executor.submit(
-            calculate_metricss,
-            prev_from, prev_to,
+            calculate_metricss, 
+            prev_from, prev_to, 
             marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
             timezone_str, False, True
         )
-
         today_current = future_today_current.result()
         today_previous = future_today_previous.result()
         yesterday_current = future_yesterday_current.result()
@@ -2161,14 +2058,13 @@ def getPeriodWiseDataCustom(request):
         last7_previous = future_last7_previous.result()
         custom_current = future_custom_current.result()
         custom_previous = future_custom_previous.result()
-
     response_data = {
         "today": create_period_response(
             "Today", today_start, today_end, yesterday_start, yesterday_end,
             today_current, today_previous
         ),
         "yesterday": create_period_response(
-            "Yesterday", yesterday_start, yesterday_end,
+            "Yesterday", yesterday_start, yesterday_end, 
             day_before_yesterday_start, day_before_yesterday_end,
             yesterday_current, yesterday_previous
         ),
@@ -2195,17 +2091,10 @@ def allMarketplaceData(request):
     timezone_str = 'US/Pacific'
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
-    if preset=='Today':
-        start_date = datetime.strptime("25/09/2025", "%d/%m/%Y")
-        start_date=local_tz.localize(start_date)
-        end_date=start_date.replace(hour=23,minute=59,second=59)
-        from_date=start_date
-        to_date=end_date
+    if start_date:
+        from_date, to_date = convertdateTotimezone(start_date, end_date, timezone_str)
     else:
-        if start_date not in [None, ""]:
-            from_date, to_date = convertdateTotimezone(start_date, end_date, timezone_str)
-        else:
-            from_date, to_date = get_date_range(preset, timezone_str)
+        from_date, to_date = get_date_range(preset, timezone_str)
     marketplace_dict = {
         str(mp.id): mp.name for mp in Marketplace.objects.only("id", "name")
     }
@@ -2811,7 +2700,7 @@ def getProductPerformanceSummary(request):
     fulfillment_channel = json_request.get('fulfillment_channel',None)
     timezone_str =  'US/Pacific'
     local_tz = pytz.timezone(timezone_str)
-    today = datetime.strptime("25/09/2025", "%d/%m/%Y")
+    today = datetime.strptime("01/09/2025", "%d/%m/%Y")
     today=local_tz.localize(today)
     yesterday_start_date = today - timedelta(days=1)
     yesterday_start_date = yesterday_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -3466,20 +3355,10 @@ def getProfitAndLossDetails(request):
     timezone = 'US/Pacific'
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
-    timezone_str = 'US/Pacific'
-    local_tz = pytz.timezone(timezone_str)
-    if preset=='Today':
-        start_date = datetime.strptime("25/09/2025", "%d/%m/%Y")
-        start_date=local_tz.localize(start_date)
-        end_date=start_date.replace(hour=23,minute=59,second=59)
-        from_date=start_date
-        to_date=end_date
+    if start_date:
+        from_date, to_date = convertdateTotimezone(start_date, end_date, timezone)
     else:
-        if start_date not in [None, ""]:
-            from_date, to_date = convertdateTotimezone(start_date, end_date, timezone_str)
-        else:
-            from_date, to_date = get_date_range(preset, timezone_str)
-        
+        from_date, to_date = get_date_range(preset, timezone)  
     def pLcalculate_metrics(start_date, end_date, marketplace_id, brand_id, product_id,
                             manufacturer_name, fulfillment_channel, timezone):
         gross_revenue = total_cogs = refund = net_profit = margin = total_units = 0
@@ -3671,28 +3550,11 @@ def profit_loss_chart(request):
     timezone = 'US/Pacific'
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
-    if preset=='Today':
-        start_date = datetime.strptime("25/09/2025", "%d/%m/%Y")
-        start_date=local_tz.localize(start_date)
-        end_date=start_date.replace(hour=23,minute=59,second=59)
-        from_date = start_date.astimezone(pytz.UTC)  
-        to_date = end_date.astimezone(pytz.UTC) 
-    elif start_date and end_date:
-        if isinstance(start_date,str):
-            start_date = datetime.strptime(start_date, "%Y-%m-%d")
-        if isinstance(end_date,str):
-            end_date = datetime.strptime(end_date, "%Y-%m-%d")
-        if start_date.tzinfo is None:
-            start_date=local_tz.localize(start_date)
-        if end_date.tzinfo is None:
-            end_date=local_tz.localize(end_date.replace(hour=23,minute=59,second=59))
-        from_date = start_date.astimezone(pytz.UTC)
-        to_date = end_date.astimezone(pytz.UTC)
-    # if start_date:
-    #     from_date, to_date = convertdateTotimezone(start_date, end_date, timezone)
-    else:       
-        from_date, to_date = get_date_range(preset, timezone)
     
+    if start_date != None and start_date != "":
+        from_date, to_date = convertdateTotimezone(start_date,end_date,timezone)
+    else:
+        from_date, to_date = get_date_range(preset,timezone)
     def get_month_range(year, month):
         start_date = datetime(year, month, 1)
         last_day = monthrange(year, month)[1]

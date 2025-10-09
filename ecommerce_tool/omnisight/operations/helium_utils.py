@@ -143,9 +143,9 @@ def getproductIdListBasedonManufacture(manufactureName = [],start_date=None, end
     if products != []:
         orders = getOrdersListBasedonProductId(products[0]['productIds'],start_date, end_date)
     return orders
-def get_date_range(preset, time_zone_str="UTC"):
+def     get_date_range(preset, time_zone_str="UTC"):
     tz = timezone(time_zone_str)
-    now = datetime.now(tz)
+    now = tz.localize(datetime(year=2025, month=9, day=1, hour=0, minute=0, second=0))
     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
     if preset == "Today":
         start = today
