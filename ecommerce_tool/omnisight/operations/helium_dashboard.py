@@ -1046,7 +1046,7 @@ def getPreviousDateRange(start_date, end_date):
     return previous_start_date.strftime("%Y-%m-%d"), previous_end_date.strftime("%Y-%m-%d")
 
 @csrf_exempt
-# @redis_cache(timeout=900,key_prefix='get_products_with_pagination')
+@redis_cache(timeout=3600,key_prefix='get_products_with_pagination')
 def get_products_with_pagination(request):
     # return main(request)
     json_request = JSONParser().parse(request)
@@ -1913,6 +1913,7 @@ def exportPeriodWiseCSV(request):
     writer.writerows(period_rows)
     return response
 @csrf_exempt
+@redis_cache(timeout=3600,key_prefix='getPeriodWiseDataCustom')
 def getPeriodWiseDataCustom(request):
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -2074,6 +2075,7 @@ def getPeriodWiseDataCustom(request):
     return JsonResponse(response_data, safe=False)
 
 @csrf_exempt
+@redis_cache(timeout=3600,key_prefix='allMarketplaceData')
 def allMarketplaceData(request):
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
