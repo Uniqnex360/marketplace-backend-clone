@@ -2696,6 +2696,7 @@ def downloadMarketplaceDataCSV(request):
     for row in metrics:
         writer.writerow(row)
     return response
+
 def sales(orders):
     sku_summary = defaultdict(lambda: {
         "sku": "",
@@ -2760,7 +2761,7 @@ def sales(orders):
                 id = item_data.get("id")
                 product_name = item_data.get("product_name", "")
                 product_id = item_data.get("product_id", "")
-                tax_price += item_data['tax_price']
+                tax_price += item_data.get('tax_price',0)
                 images = item_data.get("images", [])
                 price = item_data.get("price", 0.0)
                 if order['marketplace_name'] == "Amazon":
@@ -2795,6 +2796,7 @@ def sales(orders):
             sku_summary[sku]["margin"] = round(margin, 2)
     sorted_skus = sorted(sku_summary.values(), key=lambda x: x["unitsSold"], reverse=True)
     return sorted_skus
+
 @csrf_exempt
 def getProductPerformanceSummary(request):
     json_request = JSONParser().parse(request)
@@ -2806,6 +2808,7 @@ def getProductPerformanceSummary(request):
     timezone_str =  'US/Pacific'
     local_tz = pytz.timezone(timezone_str)
     today = datetime.strptime("25/09/2025", "%d/%m/%Y")
+    today=local_tz.localize(today)
     yesterday_start_date = today - timedelta(days=1)
     yesterday_start_date = yesterday_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
     yesterday_end_date = yesterday_start_date.replace(hour=23, minute=59, second=59)
