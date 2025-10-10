@@ -2562,105 +2562,143 @@ def downloadMarketplaceDataCSV(request):
         writer.writerow(row)
     return response
 
+from collections import defaultdict
+from bson import ObjectId
+
 def sales(orders):
-    sku_summary = defaultdict(lambda: {
-        "sku": "",
-        "product_name": "",
-        "images": "",
-        "unitsSold": 0,
-        "grossRevenue": 0.0,
-        "totalCogs": 0.0,
-        "netProfit": 0.0,
-        "margin": 0.0,
-        "vendor_funding" : 0.0
-    })
+    """
+    Optimized version of `sales()`:
+    - Collects all OrderItem IDs across all orders
+    - Executes ONE MongoDB aggregation pipeline instead of thousands
+    - Computes totals per SKU entirely inside MongoDB
+    - Returns list of SKU summaries sorted by units sold
+    """
+
+    # Collect all unique OrderItem IDs from all orders
+    all_item_ids = set()
     for order in orders:
-        item_ids = order.get("order_items", [])
-        fulfillmentChannel = ""
-        temp_price = 0.0
-        total_cogs = 0.0
-        sku_set = set()
-        tax_price = 0
-        vendor_funding = 0
-        for item_id in item_ids:
-            item_pipeline = [
-                {"$match": {"_id": item_id}},
-                {
-                    "$lookup": {
-                        "from": "product",
-                        "localField": "ProductDetails.product_id",
-                        "foreignField": "_id",
-                        "as": "product_ins"
-                    }
-                },
-                {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
-                {
-                    "$project": {
-                        "_id": 0,
-                        "id" : "$product_ins._id",
-                        "price": "$Pricing.ItemPrice.Amount",
-                        "tax_price": "$Pricing.ItemTax.Amount",
-                        "QuantityOrdered": {"$ifNull":["$ProductDetails.QuantityOrdered",0]},
-                        "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
-                        "sku": "$product_ins.sku",
-                        "product_name": "$product_ins.product_title",
-                        "product_id" : {"$ifNull" : ["$product_ins.product_id",2]},
-                        "fulfillmentChannel": {
-                            "$cond": {
-                            "if": {"$eq": ["$product_ins.fullfillment_by_channel", True]},
-                            "then": "FBA",
-                            "else": "FBM"
-                            }
-                            },
-                        "images": "$product_ins.image_url",
-                        "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
-                        "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
-                        "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
-                    }
+        for item_id in order.get("order_items", []):
+            if isinstance(item_id, str):
+                try:
+                    item_id = ObjectId(item_id)
+                except Exception:
+                    continue
+            all_item_ids.add(item_id)
+
+    if not all_item_ids:
+        return []
+
+    # Single aggregation pipeline
+    pipeline = [
+        {"$match": {"_id": {"$in": list(all_item_ids)}}},
+
+        # Join product details
+        {"$lookup": {
+            "from": "product",
+            "localField": "ProductDetails.product_id",
+            "foreignField": "_id",
+            "as": "product_ins",
+        }},
+        {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
+
+        # Flatten and clean fields
+        {"$project": {
+            "_id": 0,
+            "sku": "$product_ins.sku",
+            "product_name": "$product_ins.product_title",
+            "asin": {"$ifNull": ["$product_ins.product_id", ""]},
+            "images": "$product_ins.image_url",
+            "QuantityOrdered": {"$ifNull": ["$ProductDetails.QuantityOrdered", 0]},
+            "price": {"$ifNull": ["$Pricing.ItemPrice.Amount", 0]},
+            "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
+            "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
+            "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
+            "marketplace_name": {"$ifNull": ["$Platform", "Amazon"]},
+            "fullfillment_by_channel": {
+                "$ifNull": ["$product_ins.fullfillment_by_channel", False]
+            },
+        }},
+
+        # Compute fields needed for grouping
+        {"$addFields": {
+            "fulfillmentChannel": {
+                "$cond": {
+                    "if": {"$eq": ["$fullfillment_by_channel", True]},
+                    "then": "FBA",
+                    "else": "FBM",
                 }
-            ]
-            item_result = list(OrderItems.objects.aggregate(*item_pipeline))
-            if item_result:
-                item_data = item_result[0]
-                sku = item_data.get("sku")
-                id = item_data.get("id")
-                product_name = item_data.get("product_name", "")
-                product_id = item_data.get("product_id", "")
-                tax_price += item_data.get('tax_price',0)
-                images = item_data.get("images", [])
-                price = item_data.get("price", 0.0)
-                if order['marketplace_name'] == "Amazon":
-                    cogs = item_data.get("total_cogs", 0.0)
-                    temp_units = item_data.get("QuantityOrdered", 0)
-                else:
-                    cogs = item_data.get("w_total_cogs", 0.0)
-                    temp_units = 1
-                vendor_funding = item_data.get("vendor_funding", 0.0)
-                temp_price += price
-                total_cogs += cogs
-                fulfillmentChannel = item_data.get("fulfillmentChannel", 0.0)
-                if sku:
-                    sku_set.add(sku)
-                    sku_summary[sku]["id"] = str(id)
-                    sku_summary[sku]["sku"] = sku
-                    sku_summary[sku]["product_name"] = product_name
-                    sku_summary[sku]["asin"] = product_id
-                    sku_summary[sku]["images"] = images
-                    sku_summary[sku]["unitsSold"] += temp_units
-                    sku_summary[sku]["grossRevenue"] += price
-                    sku_summary[sku]["totalCogs"] += cogs
-                    sku_summary[sku]["fulfillmentChannel"] = fulfillmentChannel
-                    sku_summary[sku]["vendor_funding"] += vendor_funding
-        for sku in sku_set:
-            gross = sku_summary[sku]["grossRevenue"]
-            cogs = sku_summary[sku]["totalCogs"]
-            vendor_funding = sku_summary[sku]["vendor_funding"]
-            net_profit = (gross - cogs) + vendor_funding
-            margin = (net_profit / gross) * 100 if gross > 0 else 0
-            sku_summary[sku]["netProfit"] = round(net_profit, 2)
-            sku_summary[sku]["margin"] = round(margin, 2)
-    sorted_skus = sorted(sku_summary.values(), key=lambda x: x["unitsSold"], reverse=True)
-    return sorted_skus
+            },
+            # Choose cost field depending on marketplace
+            "chosen_cogs": {
+                "$cond": [
+                    {"$eq": ["$marketplace_name", "Amazon"]},
+                    "$total_cogs",
+                    "$w_total_cogs",
+                ]
+            },
+        }},
+
+        # Group by SKU (one doc per product)
+        {"$group": {
+            "_id": "$sku",
+            "product_name": {"$first": "$product_name"},
+            "asin": {"$first": "$asin"},
+            "images": {"$first": "$images"},
+            "unitsSold": {"$sum": "$QuantityOrdered"},
+            "grossRevenue": {"$sum": "$price"},
+            "totalCogs": {"$sum": "$chosen_cogs"},
+            "vendor_funding": {"$sum": "$vendor_funding"},
+            "fulfillmentChannel": {"$first": "$fulfillmentChannel"},
+        }},
+
+        # Compute derived financial metrics
+        {"$addFields": {
+            "netProfit": {
+                "$add": [
+                    {"$subtract": ["$grossRevenue", "$totalCogs"]},
+                    "$vendor_funding"
+                ]
+            },
+            "margin": {
+                "$cond": [
+                    {"$gt": ["$grossRevenue", 0]},
+                    {"$multiply": [
+                        {"$divide": [
+                            {"$add": [
+                                {"$subtract": ["$grossRevenue", "$totalCogs"]},
+                                "$vendor_funding"
+                            ]},
+                            "$grossRevenue"
+                        ]},
+                        100
+                    ]},
+                    0
+                ]
+            },
+        }},
+
+        # Sort by units sold
+        {"$sort": {"unitsSold": -1}},
+    ]
+
+    # Execute once — no nested lookups
+    sku_summary = list(OrderItems.objects.aggregate(*pipeline))
+
+    # Final cleanup / ensure consistent field names
+    for entry in sku_summary:
+        entry["sku"] = entry.pop("_id", "")
+        entry["grossRevenue"] = round(entry.get("grossRevenue", 0.0), 2)
+        entry["totalCogs"] = round(entry.get("totalCogs", 0.0), 2)
+        entry["netProfit"] = round(entry.get("netProfit", 0.0), 2)
+        entry["margin"] = round(entry.get("margin", 0.0), 2)
+        entry.setdefault("vendor_funding", 0.0)
+        entry.setdefault("images", "")
+        entry.setdefault("fulfillmentChannel", "")
+        entry.setdefault("product_name", "")
+        entry.setdefault("asin", "")
+        entry.setdefault("unitsSold", 0)
+
+    return sku_summary
 
 @csrf_exempt
 @redis_cache(timeout=3600,key_prefix='getProductPerformanceSummary')

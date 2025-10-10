@@ -1082,7 +1082,7 @@ def get_top_movers(yesterday_data, previous_day_data):
         change = yesterday_units - prev_units  
         changes.append({
             'sku': sku,
-            "id" : item['id'],
+            "id": item.get("id") or item.get("_id", ""),
             "asin" : item['asin'],
             "fulfillmentChannel" : item['fulfillmentChannel'],
             'product_name': item['product_name'],
