@@ -1652,7 +1652,7 @@ def clean_json_floats(obj):
     return obj
 
 @csrf_exempt
-@redis_cache(timeout=3600,key_prefix='getPeriodWiseData')
+@redis_cache(timeout=86400,key_prefix='getPeriodWiseData')
 def getPeriodWiseData(request):
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
