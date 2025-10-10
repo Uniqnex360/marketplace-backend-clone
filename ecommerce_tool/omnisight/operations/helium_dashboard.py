@@ -1656,17 +1656,15 @@ def clean_json_floats(obj):
 def getPeriodWiseData(request):
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
     json_request = JSONParser().parse(request)
-    marketplace_id = json_request.get('marketplace_id', None)
+    marketplace_id = json_request.get('marketplace_id')
     brand_id = json_request.get('brand_id', [])
     product_id = json_request.get('product_id', [])
     manufacturer_name = json_request.get('manufacturer_name', [])
-    fulfillment_channel = json_request.get('fulfillment_channel', None)
+    fulfillment_channel = json_request.get('fulfillment_channel')
     timezone_str = 'US/Pacific'
-    cache_key = json.dumps(json_request, sort_keys=True)
-    cached = period_data_cache.get(cache_key)
-    if cached:
-        return JsonResponse(cached, safe=False)
+
     periods = {
         "yesterday": get_date_range("Yesterday", timezone_str),
         "last7Days": get_date_range("Last 7 days", timezone_str),
@@ -1674,11 +1672,14 @@ def getPeriodWiseData(request):
         "yearToDate": get_date_range("This Year", timezone_str),
         "lastYear": get_date_range("Last Year", timezone_str)
     }
+
     ordered_keys = ["yesterday", "last7Days", "last30Days", "yearToDate"]
-    ordered_response=OrderedDict()
+    ordered_response = OrderedDict()
+
     def get_previous_range(current_start, current_end):
         duration = current_end - current_start
         return current_start - duration, current_end - duration
+
     period_jobs = {}
     for key in ["yesterday", "last7Days", "last30Days", "yearToDate"]:
         cur_start, cur_end = periods[key]
@@ -1693,85 +1694,61 @@ def getPeriodWiseData(request):
             "current_start": cur_start,
             "current_end": cur_end,
             "previous_start": prev_start,
-            "previous_end": prev_end
+            "previous_end": prev_end,
         }
+
     response_data = {}
-    # for key in ["last7Days", "last30Days", "yearToDate"]:
-    #     cache_key = f"{cache_key_prefix}_{key}"
-    #     cached_data = cache.get(cache_key)
-    #     if cached_data:
-    #         response_data[key] = cached_data
+
+    # --- Parallel execution for all periods ---
     with ThreadPoolExecutor(max_workers=8) as executor:
         futures = {}
-        futures["yesterday_current"] = executor.submit(
-            calculate_metricss,
-            period_jobs["yesterday"]["current_start"], period_jobs["yesterday"]["current_end"],
-            marketplace_id, brand_id, product_id, manufacturer_name,
-            fulfillment_channel, timezone_str, False, True
-        )
-        futures["yesterday_previous"] = executor.submit(
-            calculate_metricss,
-            period_jobs["yesterday"]["previous_start"], period_jobs["yesterday"]["previous_end"],
-            marketplace_id, brand_id, product_id, manufacturer_name,
-            fulfillment_channel, timezone_str, False, True
-        )
+        for period_key, job in period_jobs.items():
+            futures[f"{period_key}_current"] = executor.submit(
+                calculate_metricss,
+                job["current_start"], job["current_end"],
+                marketplace_id, brand_id, product_id, manufacturer_name,
+                fulfillment_channel, timezone_str, False, True
+            )
+            futures[f"{period_key}_previous"] = executor.submit(
+                calculate_metricss,
+                job["previous_start"], job["previous_end"],
+                marketplace_id, brand_id, product_id, manufacturer_name,
+                fulfillment_channel, timezone_str, False, True
+            )
+
         results = {key: f.result() for key, f in futures.items()}
-    output = {
-        "label": period_jobs["yesterday"]["label"],
-        "period": {
-            "current": {
-                "from": to_utc_format(period_jobs["yesterday"]["current_start"]),
-                "to": to_utc_format(period_jobs["yesterday"]["current_end"])
+
+    # --- Build response data ---
+    for key in ["yesterday", "last7Days", "last30Days", "yearToDate"]:
+        current_metrics = results[f"{key}_current"]
+        previous_metrics = results[f"{key}_previous"]
+
+        data = {
+            "label": period_jobs[key]["label"],
+            "period": {
+                "current": {
+                    "from": to_utc_format(period_jobs[key]["current_start"]),
+                    "to": to_utc_format(period_jobs[key]["current_end"]),
+                },
+                "previous": {
+                    "from": to_utc_format(period_jobs[key]["previous_start"]),
+                    "to": to_utc_format(period_jobs[key]["previous_end"]),
+                },
             },
-            "previous": {
-                "from": to_utc_format(period_jobs["yesterday"]["previous_start"]),
-                "to": to_utc_format(period_jobs["yesterday"]["previous_end"])
-            }
         }
-    }
-    current_metrics = results["yesterday_current"]
-    previous_metrics = results["yesterday_previous"]
-    for metric in current_metrics:
-        output[metric] = {
-            "current": current_metrics[metric],
-            "previous": previous_metrics.get(metric, 0)
-        }
-    response_data["yesterday"] = output
-    for key in ["last7Days", "last30Days", "yearToDate"]:
-        if key not in response_data:
-            current = calculate_metricss(
-                period_jobs[key]["current_start"], period_jobs[key]["current_end"],
-                marketplace_id, brand_id, product_id, manufacturer_name,
-                fulfillment_channel, timezone_str, False, True
-            )
-            previous = calculate_metricss(
-                period_jobs[key]["previous_start"], period_jobs[key]["previous_end"],
-                marketplace_id, brand_id, product_id, manufacturer_name,
-                fulfillment_channel, timezone_str, False, True
-            )
-            data = {
-                "label": period_jobs[key]["label"],
-                "period": {
-                    "current": {
-                        "from": to_utc_format(period_jobs[key]["current_start"]),
-                        "to": to_utc_format(period_jobs[key]["current_end"])
-                    },
-                    "previous": {
-                        "from": to_utc_format(period_jobs[key]["previous_start"]),
-                        "to": to_utc_format(period_jobs[key]["previous_end"])
-                    }
-                }
+
+        for metric in current_metrics:
+            data[metric] = {
+                "current": current_metrics[metric],
+                "previous": previous_metrics.get(metric, 0),
             }
-            for metric in current:
-                data[metric] = {
-                    "current": current[metric],
-                    "previous": previous.get(metric, 0)
-                }
-            response_data[key] = data
+
+        response_data[key] = data
+
     for key in ordered_keys:
         if key in response_data:
-            ordered_response[key]=response_data[key]
-    period_data_cache.set(cache_key, ordered_response)
+            ordered_response[key] = response_data[key]
+
     return JsonResponse(ordered_response, safe=False)
 
 @csrf_exempt
