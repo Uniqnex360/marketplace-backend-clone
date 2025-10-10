@@ -1,5 +1,6 @@
 from __future__ import annotations
 import pandas as pd
+from ecommerce_tool.util.marketplaces import get_filtered_marketplaces
 from omnisight.decorators import redis_cache
 from omnisight.operations.core_calculator import EcommerceCalculator
 from omnisight.decorators import redis_cache
@@ -219,6 +220,10 @@ def get_metrics_by_date_range(request):
     manufacturer_name = json_request.get('manufacturer_name', [])
     fulfillment_channel = json_request.get('fulfillment_channel', None)
     timezone_str="US/Pacific"
+    country=json_request.get("country","US")
+    print('COUNTTRYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY',country)
+    filtered_marketplace_id=get_filtered_marketplaces(country,marketplace_id)
+    print("FILTERED MARKETPLACE DDDDDDDDDDDDDDDDDD",filtered_marketplace_id)
     preset=json_request.get('preset','Today')
     start_date_str=json_request.get("start_date",None)
     end_date_str=json_request.get('end_date',None)
@@ -267,7 +272,7 @@ def get_metrics_by_date_range(request):
     graph_data = {}
     def process_date_range(key, date_range, results):
         gross_revenue_with_tax = 0
-        result = grossRevenue(date_range["start"], date_range["end"], marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
+        result = grossRevenue(date_range["start"], date_range["end"], filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
         if result != []:
             for ins in result:
                 original_order_total = ins.get('original_order_total', 0.0) 
@@ -286,7 +291,7 @@ def get_metrics_by_date_range(request):
     all_order_item_ids = set()
     all_raw_results = {}
     for key, date_range in date_filters.items():
-        raw_result = grossRevenue(date_range["start"], date_range["end"], marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
+        raw_result = grossRevenue(date_range["start"], date_range["end"], filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
         result=[
             r for r in raw_result
             if r.get('order_status') not in ['Cancelled','Canceled'] and r.get('order_total')>0
@@ -715,9 +720,12 @@ def RevenueWidgetAPIView(request):
 def updatedRevenueWidgetAPIView(request):
     json_request = JSONParser().parse(request)
     preset = json_request.get("preset", "Today")
+    country=json_request.get('country','US')
+    marketplace_id = json_request.get("marketplace_id", None)
+    filtered_marketplace_id=get_filtered_marketplaces(country,marketplace_id)
     compare_startdate = json_request.get("compare_startdate")
     compare_enddate = json_request.get("compare_enddate")
-    marketplace_id = json_request.get("marketplace_id", None)
+    
     product_id = json_request.get("product_id", None)
     brand_id = json_request.get("brand_id", None)
     manufacturer_name = json_request.get("manufacturer_name", None)
@@ -740,23 +748,23 @@ def updatedRevenueWidgetAPIView(request):
     comapre_past = get_previous_periods(start_date, end_date)
     def fetch_total():
         return totalRevenueCalculation(
-            start_date, end_date, marketplace_id, brand_id,
+            start_date, end_date, filtered_marketplace_id, brand_id,
             product_id, manufacturer_name, fulfillment_channel, timezone_str
         )
     def fetch_graph_data():
         return get_graph_data(
-            start_date, end_date, preset, marketplace_id, brand_id,
+            start_date, end_date, preset, filtered_marketplace_id, brand_id,
             product_id, manufacturer_name, fulfillment_channel, timezone_str
         )
     def fetch_compare_total():
         return totalRevenueCalculation(
-            compare_startdate, compare_enddate, marketplace_id,
+            compare_startdate, compare_enddate, filtered_marketplace_id,
             brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str
         )
     def fetch_compare_graph_data():
         initial = "Today" if compare_startdate.date() == compare_enddate.date() else None
         return get_graph_data(
-            compare_startdate, compare_enddate, initial, marketplace_id,
+            compare_startdate, compare_enddate, initial, filtered_marketplace_id,
             brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str
         )
     with ThreadPoolExecutor(max_workers=4) as executor:
@@ -1660,11 +1668,12 @@ def getPeriodWiseData(request):
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id')
     brand_id = json_request.get('brand_id', [])
+    country=json_request.get('country','US')
     product_id = json_request.get('product_id', [])
     manufacturer_name = json_request.get('manufacturer_name', [])
     fulfillment_channel = json_request.get('fulfillment_channel')
     timezone_str = 'US/Pacific'
-
+    filtered_marketplace_id=get_filtered_marketplaces(country,marketplace_id)
     periods = {
         "yesterday": get_date_range("Yesterday", timezone_str),
         "last7Days": get_date_range("Last 7 days", timezone_str),
@@ -1706,13 +1715,13 @@ def getPeriodWiseData(request):
             futures[f"{period_key}_current"] = executor.submit(
                 calculate_metricss,
                 job["current_start"], job["current_end"],
-                marketplace_id, brand_id, product_id, manufacturer_name,
+                filtered_marketplace_id, brand_id, product_id, manufacturer_name,
                 fulfillment_channel, timezone_str, False, True
             )
             futures[f"{period_key}_previous"] = executor.submit(
                 calculate_metricss,
                 job["previous_start"], job["previous_end"],
-                marketplace_id, brand_id, product_id, manufacturer_name,
+                filtered_marketplace_id, brand_id, product_id, manufacturer_name,
                 fulfillment_channel, timezone_str, False, True
             )
 
@@ -1896,8 +1905,10 @@ def getPeriodWiseDataCustom(request):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
+    country=json_request.get('country','US')
     brand_id = json_request.get('brand_id', [])
     product_id = json_request.get('product_id', [])
+    filtered_marketplace_id=get_filtered_marketplaces(country,marketplace_id)
     manufacturer_name = json_request.get('manufacturer_name', [])
     fulfillment_channel = json_request.get('fulfillment_channel', None)
     timezone_str = "US/Pacific"
@@ -1977,49 +1988,49 @@ def getPeriodWiseDataCustom(request):
         future_today_current = executor.submit(
             calculate_metricss, 
             today_start, today_end, 
-            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
+            filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
             timezone_str
         )
         future_today_previous = executor.submit(
             calculate_metricss, 
             yesterday_start, yesterday_end, 
-            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
+            filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
             timezone_str, False, True
         )
         future_yesterday_current = executor.submit(
             calculate_metricss, 
             yesterday_start, yesterday_end, 
-            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
+            filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
             timezone_str, False, True
         )
         future_yesterday_previous = executor.submit(
             calculate_metricss, 
             day_before_yesterday_start, day_before_yesterday_end, 
-            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
+            filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
             timezone_str, False, True
         )
         future_last7_current = executor.submit(
             calculate_metricss, 
             last7_start, last7_end, 
-            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
+            filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
             timezone_str, False, True
         )
         future_last7_previous = executor.submit(
             calculate_metricss, 
             last7_prev_start, last7_prev_end, 
-            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
+            filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
             timezone_str, False, True
         )
         future_custom_current = executor.submit(
             calculate_metricss, 
             from_date, to_date, 
-            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
+            filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
             timezone_str, False, True
         )
         future_custom_previous = executor.submit(
             calculate_metricss, 
             prev_from, prev_to, 
-            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
+            filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
             timezone_str, False, True
         )
         today_current = future_today_current.result()
@@ -2058,6 +2069,8 @@ def allMarketplaceData(request):
     marketplace_id = json_request.get('marketplace_id', None)
     brand_id = json_request.get('brand_id', [])
     product_id = json_request.get('product_id', [])
+    country=json_request.get('country','US')
+    filtered_marketplace_id=get_filtered_marketplaces(country,marketplace_id)
     manufacturer_name = json_request.get('manufacturer_name', [])
     fulfillment_channel = json_request.get('fulfillment_channel', None)
     preset = json_request.get('preset')
@@ -2108,6 +2121,8 @@ def allMarketplaceData(request):
             for item in OrderItems.objects.aggregate(*pipeline)
         }
     def process_orders(orders):
+        if filtered_marketplace_id and isinstance(filtered_marketplace_id, list) and len(filtered_marketplace_id) > 0:
+            orders = [order for order in orders if str(order.get('marketplace_id')) in [str(mp_id) for mp_id in filtered_marketplace_id]]
         all_item_ids = [item_id for order in orders for item_id in order["order_items"]]
         item_map = fetch_item_details_bulk(all_item_ids)
         grouped_orders = defaultdict(list)
@@ -2303,8 +2318,8 @@ def allMarketplaceData(request):
             "shipping_cost": 0
     }
     def create_period_response(cur_from, cur_to, prev_from, prev_to):
-        current_orders = grossRevenue(cur_from, cur_to, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
-        previous_orders = grossRevenue(prev_from, prev_to, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
+        current_orders = grossRevenue(cur_from, cur_to, filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
+        previous_orders = grossRevenue(prev_from, prev_to, filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
         current = calculate_metrics(current_orders)
         previous = calculate_metrics(previous_orders)
         def with_delta(metric):
@@ -2705,6 +2720,8 @@ def sales(orders):
 def getProductPerformanceSummary(request):
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
+    country=json_request.get('country','US')
+    filtered_marketplace_id=get_filtered_marketplaces(country,marketplace_id)
     brand_id = json_request.get('brand_id', [])
     product_id = json_request.get('product_id',[])
     manufacturer_name = json_request.get('manufacturer_name',[])
@@ -2720,7 +2737,7 @@ def getProductPerformanceSummary(request):
     previous_day_start_date = previous_day_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
     previous_day_end_date = previous_day_start_date.replace(hour=23, minute=59, second=59)
     def fetch_data(start_date, end_date):
-        return grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,timezone_str)
+        return grossRevenue(start_date, end_date, filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,timezone_str)
     with ThreadPoolExecutor(max_workers=2) as executor:
         future_prev_data = executor.submit(fetch_data, previous_day_start_date, previous_day_end_date)
         future_yes_data = executor.submit(fetch_data, yesterday_start_date, yesterday_end_date)
@@ -3358,6 +3375,8 @@ def getProfitAndLossDetails(request):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
+    country=json_request.get('country','US')
+    filtered_marketplace_id=get_filtered_marketplaces(country,marketplace_id)
     brand_id = json_request.get('brand_id', [])
     product_id = json_request.get('product_id', [])
     manufacturer_name = json_request.get('manufacturer_name', [])
@@ -3370,14 +3389,14 @@ def getProfitAndLossDetails(request):
         from_date, to_date = convertdateTotimezone(start_date, end_date, timezone)
     else:
         from_date, to_date = get_date_range(preset, timezone)  
-    def pLcalculate_metrics(start_date, end_date, marketplace_id, brand_id, product_id,
+    def pLcalculate_metrics(start_date, end_date, filtered_marketplace_id, brand_id, product_id,
                             manufacturer_name, fulfillment_channel, timezone):
         gross_revenue = total_cogs = refund = net_profit = margin = total_units = 0
         shipping_cost = channel_fee = product_cost = vendor_funding = tax_price = promotion_discount= ship_promotion_discount=temp_price = vendor_discount=0
         sku_set = set()
         product_categories = {}
         product_completeness = {"complete": 0, "incomplete": 0}
-        result = grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id,
+        result = grossRevenue(start_date, end_date, filtered_marketplace_id, brand_id, product_id,
                               manufacturer_name, fulfillment_channel, timezone)
         all_item_ids = []
         for order in result:
@@ -3473,11 +3492,11 @@ def getProfitAndLossDetails(request):
             "channel_fee": channel_fee
         }
     def create_period_response(label, cur_from, cur_to, prev_from, prev_to,
-                               marketplace_id, brand_id, product_id,
+                               filtered_marketplace_id, brand_id, product_id,
                                manufacturer_name, fulfillment_channel, preset, timezone):
-        current = pLcalculate_metrics(cur_from, cur_to, marketplace_id, brand_id, product_id,
+        current = pLcalculate_metrics(cur_from, cur_to, filtered_marketplace_id, brand_id, product_id,
                                       manufacturer_name, fulfillment_channel, timezone)
-        previous = pLcalculate_metrics(prev_from, prev_to, marketplace_id, brand_id, product_id,
+        previous = pLcalculate_metrics(prev_from, prev_to, filtered_marketplace_id, brand_id, product_id,
                                        manufacturer_name, fulfillment_channel, timezone)
         def with_delta(metric):
             return {
@@ -3544,7 +3563,7 @@ def getProfitAndLossDetails(request):
     prev_to_date = to_date - custom_duration
     response_data = {
         "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date,
-                                          marketplace_id, brand_id, product_id, manufacturer_name,
+                                          filtered_marketplace_id, brand_id, product_id, manufacturer_name,
                                           fulfillment_channel, preset, timezone)
     }
     return JsonResponse(response_data, safe=False)
@@ -3553,6 +3572,9 @@ def getProfitAndLossDetails(request):
 def profit_loss_chart(request):
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
+    country=json_request.get('country','US')
+    filtered_marketplace_id=get_filtered_marketplaces(country,marketplace_id)
+    manufacturer_name = json_request.get('manufacturer_name', [])
     brand_id = json_request.get('brand_id', [])
     product_id = json_request.get('product_id',[])
     manufacturer_name = json_request.get('manufacturer_name',[])
@@ -3572,8 +3594,8 @@ def profit_loss_chart(request):
         end_date = datetime(year, month, last_day, 23, 59, 59)
         return start_date, end_date
     
-    def calculate_metrics_optimized(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone):
-        result = grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone)
+    def calculate_metrics_optimized(start_date, end_date, filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone):
+        result = grossRevenue(start_date, end_date, filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone)
         
         if not result:
             return {
@@ -3818,7 +3840,7 @@ def profit_loss_chart(request):
             year, month = int(key[:4]), int(key[5:7])
             start, end = get_month_range(year, month)
         
-        data = calculate_metrics_optimized(start, end, marketplace_id, brand_id, product_id, 
+        data = calculate_metrics_optimized(start, end, filtered_marketplace_id, brand_id, product_id, 
                                          manufacturer_name, fulfillment_channel, timezone)
         
         values["grossRevenue"][key] = data["grossRevenue"]
@@ -4834,6 +4856,8 @@ def productsTrafficandConversions(request):
 def getSKUlist(request):
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id')
+    country=json_request.get('country','US')
+    filtered_marketplace_id=get_filtered_marketplaces(country,marketplace_id)
     search_query = json_request.get('search_query')
     brand_id = json_request.get('brand_id')
     manufacturer_name = json_request.get('manufacturer_name')
@@ -4844,8 +4868,8 @@ def getSKUlist(request):
     if search_query != None and search_query != "":
         search_query = re.escape(search_query.strip())
         match["sku"] = {"$regex": search_query, "$options": "i"}
-    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
-        match['marketplace_id'] = ObjectId(marketplace_id)
+    if filtered_marketplace_id and isinstance(filtered_marketplace_id,list) and len(filtered_marketplace_id)>0:
+        match['marketplace_id'] = {"$in":filtered_marketplace_id}
     if brand_id != None and brand_id != "" and brand_id != [] and brand_id != "custom":
         brand_list = [ObjectId(i) for i in brand_id]
         match['brand_id'] = {"$in":brand_list}
@@ -4875,6 +4899,8 @@ def getSKUlist(request):
 def getproductIdlist(request):
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id')
+    country=json_request.get('country','US')
+    filtered_marketplace_id=get_filtered_marketplaces(country,marketplace_id)
     brand_id = json_request.get('brand_id')
     search_query = json_request.get('search_query')
     manufacturer_name = json_request.get('manufacturer_name')
@@ -4895,8 +4921,8 @@ def getproductIdlist(request):
     if search_query:
         search_query = re.escape(search_query.strip())
         match["product_id"] = {"$regex": search_query, "$options": "i"}
-    if marketplace_id and marketplace_id not in ["", "all", "custom"]:
-        match['marketplace_id'] = ObjectId(marketplace_id)
+    if filtered_marketplace_id and isinstance(filtered_marketplace_id,list) and len(filtered_marketplace_id)>0:
+        match['marketplace_id'] = {"$in":filtered_marketplace_id}
     if manufacturer_name and manufacturer_name not in ["", [], "custom"]:
         match['manufacturer_name'] = {"$in": manufacturer_name}
     if sku_ids:
@@ -6145,6 +6171,7 @@ async def get_all_detailed_orders_by_brand_and_date(brands, start_date, end_date
     except Exception as e:
         print(f"Error getting custom orders: {e}")
         return regular_orders
+    
 @csrf_exempt
 def downloadOrders(request):
     try:
@@ -6157,6 +6184,7 @@ def downloadOrders(request):
         orders = asyncio.run(get_all_detailed_orders_by_brand_and_date(
             brands, start_date, end_date, include_custom
         ))
+        print('ordersserse',orders)
         if not orders:
             return HttpResponse(
                 json.dumps({'error': "No orders found for the given filters"}),
@@ -6242,6 +6270,7 @@ def downloadOrders(request):
                 status=400
             )
     except Exception as e:
+        print('exception',e)
         import traceback
         traceback.print_exc()
         return HttpResponse(

@@ -190,7 +190,7 @@ def     get_date_range(preset, time_zone_str="UTC"):
         return today.replace(year=today.year - 1, month=1, day=1), today.replace(year=today.year - 1, month=12, day=31, hour=23, minute=59, second=59)
     return today, (today + timedelta(days=1)).replace(hour=23, minute=59, second=59)
 
-def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
+def grossRevenue(start_date, end_date, filtered_marketplace_id=[], brand_id=None,
                  product_id=None, manufacuture_name=[], fulfillment_channel=None,
                  timezone='UTC'):
 
@@ -201,12 +201,10 @@ def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
     start_date = start_date.replace(tzinfo=None)
     end_date = end_date.replace(tzinfo=None)
 
-    # Marketplace names (only needed for final output)
     marketplace_pipeline = [{"$project": {"_id": 1, "name": 1, "image_url": 1}}]
     marketplace_list = list(Marketplace.objects.aggregate(*marketplace_pipeline))
     marketplace_names = {str(m['_id']): m['name'] for m in marketplace_list}
 
-    # Build base match criteria
     match = {
         'order_date': {"$gte": start_date, "$lte": end_date},
         'order_status': {"$nin": ["Canceled", "Cancelled"]},
@@ -216,8 +214,8 @@ def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
     if fulfillment_channel:
         match['fulfillment_channel'] = fulfillment_channel
 
-    if marketplace_id and marketplace_id not in [None, "", "all", "custom"]:
-        match['marketplace_id'] = ObjectId(marketplace_id)
+    if filtered_marketplace_id and isinstance(filtered_marketplace_id,list) and len(filtered_marketplace_id)>0:
+        match['marketplace_id'] = {"$in":filtered_marketplace_id}
 
     # Handle filtering via product/brand/manufacturer
     if manufacuture_name:
@@ -357,7 +355,7 @@ def get_previous_periods(current_start, current_end):
         }
     }
     return response_data
-def refundOrder(start_date, end_date, marketplace_id=None,brand_id=None,product_id=None,manufacuture_name=[],fulfillment_channel=None,timezone='UTC'):    
+def refundOrder(start_date, end_date, filtered_marketplace_id=[],brand_id=None,product_id=None,manufacuture_name=[],fulfillment_channel=None,timezone='UTC'):    
     if timezone != 'UTC':
         start_date,end_date = convertLocalTimeToUTC(start_date, end_date, timezone)
     start_date = start_date.replace(tzinfo=None)
@@ -367,8 +365,8 @@ def refundOrder(start_date, end_date, marketplace_id=None,brand_id=None,product_
     match['order_status'] = "Refunded"
     if fulfillment_channel:
         match['fulfillment_channel'] = fulfillment_channel
-    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
-        match['marketplace_id'] = ObjectId(marketplace_id)
+    if filtered_marketplace_id and isinstance(filtered_marketplace_id,list) and len(filtered_marketplace_id)>0:
+        match['marketplace_id'] = {"$in":filtered_marketplace_id}
     if manufacuture_name != None and manufacuture_name != "" and manufacuture_name != []:
         ids = getproductIdListBasedonManufacture(manufacuture_name,start_date, end_date)
         match["_id"] = {"$in": ids}
@@ -498,8 +496,7 @@ def create_empty_bucket_data(time_key):
         "current_date": time_key
     }
 from concurrent.futures import ThreadPoolExecutor
-
-def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, product_id=None, 
+def get_graph_data(start_date, end_date, preset, filtered_marketplace_id, brand_id=None, product_id=None, 
                   manufacturer_name=None, fulfillment_channel=None, timezone="UTC"):
     user_timezone = pytz.timezone(timezone) if timezone != 'UTC' else pytz.UTC
     original_start_date = start_date
@@ -512,7 +509,9 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
     start_date_utc = start_date_utc.replace(tzinfo=None)
     end_date_utc = end_date_utc.replace(tzinfo=None)
     bucket_to_local_date_map = {}
-    is_single_day=(preset in ['Today',"Yesterday"]) or (start_date.date()==end_date.date())
+    is_single_day = (preset in ['Today', "Yesterday"]) or (start_date.date() == end_date.date())
+
+    # Time buckets setup
     if is_single_day:
         time_buckets = [(start_date_utc + timedelta(hours=i)).replace(minute=0, second=0, microsecond=0) 
                       for i in range(24)]
@@ -529,6 +528,7 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
             local_date_key = current_date.strftime(time_format)
             bucket_to_local_date_map[utc_key] = local_date_key
             current_date += timedelta(days=1)
+
     graph_data = {}
     for dt in time_buckets:
         time_key = dt.strftime(time_format)
@@ -536,40 +536,68 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
             "gross_revenue": 0, "net_profit": 0, "profit_margin": 0, "orders": 0,
             "units_sold": 0, "refund_amount": 0, "refund_quantity": 0
         }
+
     if not is_single_day and timezone != 'UTC':
         query_end_date = end_date_utc + timedelta(days=1)
     else:
         query_end_date = end_date_utc
-    match = {
-        'order_status__in': ['Shipped', 'Delivered', 'Acknowledged', 'Pending', 'Unshipped', 'PartiallyShipped'],
-        'order_date__gte': start_date_utc, 'order_date__lt': query_end_date
-    }
+
+    # Build aggregation pipeline
+    pipeline = [
+        {
+            "$match": {
+                "order_status": {"$in": ["Shipped", "Delivered", "Acknowledged", "Pending", "Unshipped", "PartiallyShipped"]},
+                "order_date": {"$gte": start_date_utc, "$lt": query_end_date}
+            }
+        }
+    ]
+
+    # Add marketplace filter
+    if filtered_marketplace_id and isinstance(filtered_marketplace_id, list) and len(filtered_marketplace_id) > 0:
+        pipeline[0]["$match"]["marketplace_id"] = {"$in": filtered_marketplace_id}
+
+    # Add fulfillment channel
     if fulfillment_channel:
-        match['fulfillment_channel'] = fulfillment_channel
-    if marketplace_id not in [None, "", "all", "custom"]:
-        match['marketplace_id'] = ObjectId(marketplace_id)
+        pipeline[0]["$match"]["fulfillment_channel"] = fulfillment_channel
+
+    # Add brand/product/manufacturer filters via $in
     if manufacturer_name not in [None, "", []]:
         ids = getproductIdListBasedonManufacture(manufacturer_name, start_date_utc, end_date_utc)
-        match["id__in"] = ids
+        if ids:
+            pipeline[0]["$match"]["_id"] = {"$in": ids}
     elif product_id not in [None, "", []]:
         product_id = [ObjectId(pid) for pid in product_id]
         ids = getOrdersListBasedonProductId(product_id, start_date_utc, end_date_utc)
-        match["id__in"] = ids
+        if ids:
+            pipeline[0]["$match"]["_id"] = {"$in": ids}
     elif brand_id not in [None, "", []]:
         brand_id = [ObjectId(bid) for bid in brand_id]
         ids = getproductIdListBasedonbrand(brand_id, start_date_utc, end_date_utc)
-        match["id__in"] = ids
+        if ids:
+            pipeline[0]["$match"]["_id"] = {"$in": ids}
+
+    # Execute aggregation
+    orders_cursor = Order.objects.aggregate(*pipeline)
+    orders_dict_list = list(orders_cursor)
+    orders_list = []
+    for doc in orders_dict_list:
+        try:
+            order = Order.objects.get(id=doc['_id'])
+            orders_list.append(order)
+        except Exception as e:
+            continue  
+
+    # Group orders by time bucket
     orders_by_bucket = {}
-    orders = DatabaseModel.list_documents(Order.objects, match)
-    orders_list = list(orders)
     for dt in time_buckets:
         bucket_start = dt
         bucket_end = dt + timedelta(hours=1) if is_single_day else dt + timedelta(days=1)
         orders_by_bucket[dt.strftime(time_format)] = [
-        order for order in orders_list 
-        if bucket_start <= order.order_date < bucket_end
-    ]
-        
+            order for order in orders_list 
+            if bucket_start <= order.order_date < bucket_end
+        ]
+
+    # Process each time bucket
     def process_time_bucket(time_key):
         nonlocal graph_data, orders_by_bucket
         bucket_orders = orders_by_bucket.get(time_key, [])
@@ -577,24 +605,28 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
         refund_amount = 0
         refund_quantity = 0
         total_units = 0
-        temp_other_price = 0 
+        temp_other_price = 0
         vendor_funding = 0
         vendor_discount = 0
         shipping_price = 0
-        promotion_discount=0
-        ship_promotion_discount=0
+        promotion_discount = 0
+        ship_promotion_discount = 0
         channel_fee = 0
+
         bucket_start = datetime.strptime(time_key, time_format).replace(tzinfo=pytz.UTC)
         if is_single_day:
             bucket_end = bucket_start + timedelta(hours=1)
         else:
             bucket_end = bucket_start + timedelta(days=1)
-        refund_ins = refundOrder(bucket_start, bucket_end, marketplace_id, brand_id, product_id)
+
+        # Get refunds in this bucket
+        refund_ins = refundOrder(bucket_start, bucket_end, filtered_marketplace_id, brand_id, product_id)
         if refund_ins:
             for ins in refund_ins:
                 if bucket_start <= ins['order_date'] < bucket_end:
                     refund_amount += ins['order_total']
                     refund_quantity += len(ins['order_items'])
+
         all_item_ids = []
         unique_order_ids = set()
         for order in bucket_orders:
@@ -604,8 +636,10 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
                 unique_order_ids.add(po_id)
             for item in order.order_items:
                 all_item_ids.append(item.id)
+
+        # Fetch item details via aggregation
         if all_item_ids:
-            pipeline = [
+            item_pipeline = [
                 {"$match": {"_id": {"$in": all_item_ids}}},
                 {"$lookup": {
                     "from": "product",
@@ -617,18 +651,19 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
                 {"$project": {
                     "_id": 1,
                     "price": {"$ifNull": ["$Pricing.ItemPrice.Amount", 0]},
-                    "product_cost": {"$round":[{"$ifNull": ["$product_ins.product_cost", 0]},2]},
+                    "product_cost": {"$round": [{"$ifNull": ["$product_ins.product_cost", 0]}, 2]},
                     "promotion_discount": {"$ifNull": ["$Pricing.PromotionDiscount.Amount", 0]},
                     "ship_promotion_discount": {"$ifNull": ["$Pricing.ShipPromotionDiscount.Amount", 0]},
                     "vendor_discount": {"$ifNull": ["$product_ins.vendor_discount", 0]},
                     "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
-                    "referral_fee": {"$round":[{"$ifNull": ["$product_ins.referral_fee", 0]},2]},
+                    "referral_fee": {"$round": [{"$ifNull": ["$product_ins.referral_fee", 0]}, 2]},
                     "walmart_fee": {"$ifNull": ["$product_ins.walmart_fee", 0]},
-                    "QuantityOrdered": {"$ifNull": ["$ProductDetails.QuantityOrdered", 1]},
+                    "QuantityOrdered": {"$ifNull": ["$ProductDetails.QuantityOrdered", 1]}
                 }}
             ]
-            item_results = list(OrderItems.objects.aggregate(*pipeline))
+            item_results = list(OrderItems.objects.aggregate(*item_pipeline))
             item_map = {str(item["_id"]): item for item in item_results}
+
             for order in bucket_orders:
                 for item in order.order_items:
                     item_data = item_map.get(str(item.id))
@@ -640,36 +675,45 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
                     temp_other_price += price
                     total_units += quantity
                     total_cogs += product_cost * quantity
-                    vendor_funding += float(item_data.get('vendor_funding', 0) or 0)*quantity
-                    promotion_discount+=float(item_data.get('promotion_discount',0) or 0)
-                    ship_promotion_discount+=float(item_data.get('ship_promotion_discount',0) or 0)
+                    vendor_funding += float(item_data.get('vendor_funding', 0) or 0) * quantity
+                    promotion_discount += float(item_data.get('promotion_discount', 0) or 0)
+                    ship_promotion_discount += float(item_data.get('ship_promotion_discount', 0) or 0)
                     vendor_discount += float(item_data.get('vendor_discount', 0) or 0)
-                    channel_fee += float(item_data.get('referral_fee', 0))*quantity
+                    channel_fee += float(item_data.get('referral_fee', 0)) * quantity
+
                 fulfillment_channel = getattr(order, 'fulfillment_channel', "")
                 merchant_shipment_cost = getattr(order, 'merchant_shipment_cost', 0) or 0
-                if merchant_shipment_cost is None: 
+                if merchant_shipment_cost is None:
                     if fulfillment_channel == 'AFN':
                         merchant_shipment_cost = getattr(order, 'shipping_price', 0) or 0
                 total_cogs += merchant_shipment_cost
-        gross_revenue_with_tax = temp_other_price 
-        net_profit = (temp_other_price + shipping_price +promotion_discount+ vendor_funding - (channel_fee + total_cogs + vendor_discount+ship_promotion_discount))
+
+        gross_revenue_with_tax = temp_other_price
+        net_profit = (temp_other_price + shipping_price + promotion_discount + vendor_funding - 
+                     (channel_fee + total_cogs + vendor_discount + ship_promotion_discount))
         profit_margin = round((net_profit / gross_revenue_with_tax) * 100, 2) if gross_revenue_with_tax else 0
+
         graph_data[time_key] = {
             "gross_revenue_with_tax": round(gross_revenue_with_tax, 2),
             "net_profit": round(net_profit, 2),
             "profit_margin": profit_margin,
-            "orders": len(unique_order_ids),  
+            "orders": len(unique_order_ids),
             "units_sold": total_units,
             "refund_amount": round(refund_amount, 2),
             "refund_quantity": refund_quantity
         }
+
+    # Process all buckets in parallel
     with ThreadPoolExecutor(max_workers=4) as executor:
         futures = {executor.submit(process_time_bucket, time_key): time_key for time_key in graph_data}
         for future in futures:
             future.result()
+
+    # Convert UTC timestamps to local timezone
     converted_graph_data = {}
     start_date_only = original_start_date.date()
     end_date_only = original_end_date.date()
+
     if is_single_day:
         for utc_time_key, data in graph_data.items():
             utc_dt = datetime.strptime(utc_time_key, time_format).replace(tzinfo=pytz.UTC)
@@ -685,9 +729,11 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
                 if start_date_only <= local_date <= end_date_only:
                     converted_graph_data[local_time_key] = data
                     converted_graph_data[local_time_key]["current_date"] = local_time_key
+
     return converted_graph_data
 
-def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=None, product_id=None, manufacturer_name=None, fulfillment_channel=None, timezone_str="UTC"):
+
+def totalRevenueCalculation(start_date, end_date, filtered_marketplace_id=[], brand_id=None, product_id=None, manufacturer_name=None, fulfillment_channel=None, timezone_str="UTC"):
     total = dict()
     gross_revenue_with_tax = 0
     refund = 0
@@ -704,8 +750,8 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=
     ship_promotion_discount=0 
     shipping_price = 0
     channel_fee = 0
-    orders = grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
-    refund_ins = refundOrder(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
+    orders = grossRevenue(start_date, end_date, filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
+    refund_ins = refundOrder(start_date, end_date, filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
     if refund_ins:
         for ins in refund_ins:
             refund += ins['order_total']
@@ -809,7 +855,7 @@ def chunked_aggregate(pipeline_base, id_list, chunk_size=5000):
 def calculate_metricss(
     from_date,
     to_date,
-    marketplace_id,
+    filtered_marketplace_id,
     brand_id,
     product_id,
     manufacturer_name,
@@ -844,7 +890,7 @@ def calculate_metricss(
     product_categories = {}  
     product_completeness = {"complete": 0, "incomplete": 0}  
     total_product_cost = 0  
-    result = grossRevenue(from_date, to_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone)
+    result = grossRevenue(from_date, to_date, filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone)
     all_item_ids = [ObjectId(item_id) for order in result for item_id in order['order_items']]
     for order in result:
         po_id=order.get('purchase_order_id')
