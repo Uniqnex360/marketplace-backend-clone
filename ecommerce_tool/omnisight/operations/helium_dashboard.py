@@ -5892,6 +5892,7 @@ def priceGraph(request):
             "price": round(price, 2)
         })
     return response_data
+
 async def get_detailed_orders_by_brand_and_date(brands, start_date, end_date):
     try:
         start_datetime, end_datetime = None, None
@@ -5917,70 +5918,24 @@ async def get_detailed_orders_by_brand_and_date(brands, start_date, end_date):
             order_items_with_products = OrderItems.objects(ProductDetails__product_id__in=product_ids_from_brands).only('id')
             order_item_ids = [oi.id for oi in order_items_with_products]
             match_query["order_items"] = {"$in": order_item_ids}
-        
-        # OPTIMIZATION: Batch fetch all products and create cache
-        def batch_get_product_cost_details():
-            """Pre-fetch all products and create a lookup dictionary"""
-            product_cache = {}
-            try:
-                # Get all products in one query
-                all_products = Product.objects().only(
-                    'sku', 'product_cost', 'cogs', 'w_product_cost',
-                    'referral_fee', 'vendor_funding', 'vendor_discount'
-                )
-                for product in all_products:
-                    # Cache for Walmart
-                    walmart_key = f"{product.sku}_walmart"
-                    product_cache[walmart_key] = {
-                        'product_cost': getattr(product, 'w_product_cost', 0.0) or getattr(product, 'product_cost', 0.0) or getattr(product, 'cogs', 0.0),
-                        'marketplace_fee': getattr(product, 'referral_fee', 0.0) or getattr(product, 'referral_fee', 0.0),
-                        'vendor_funding': getattr(product, 'vendor_funding', 0.0),
-                        'vendor_discount': getattr(product, 'vendor_discount', 0.0)
-                    }
-                    # Cache for other marketplaces
-                    other_key = f"{product.sku}_other"
-                    product_cache[other_key] = {
-                        'product_cost': getattr(product, 'product_cost', 0.0) or getattr(product, 'cogs', 0.0),
-                        'marketplace_fee': getattr(product, 'referral_fee', 0.0),
-                        'vendor_funding': getattr(product, 'vendor_funding', 0.0),
-                        'vendor_discount': getattr(product, 'vendor_discount', 0.0)
-                    }
-            except Exception as e:
-                print(f"Error creating product cache: {e}")
-            return product_cache
-        
-        # OPTIMIZATION: Batch fetch all merchant shipment costs
-        def batch_get_merchant_shipment_costs():
-            """Pre-fetch all orders and create a lookup dictionary"""
-            cost_cache = {}
-            try:
-                # Get all orders in one query
-                all_orders = Order.objects().only('purchase_order_id', 'merchant_shipment_cost', 'shipping_cost')
-                for order_doc in all_orders:
-                    cost = getattr(order_doc, 'merchant_shipment_cost', 0.0) or getattr(order_doc, 'shipping_cost', 0.0)
-                    cost_cache[order_doc.purchase_order_id] = cost
-            except Exception as e:
-                print(f"Error creating merchant cost cache: {e}")
-            return cost_cache
-        
-        # Pre-fetch all data
-        product_cache = batch_get_product_cost_details()
-        merchant_cost_cache = batch_get_merchant_shipment_costs()
-        
-        # Modified functions to use cache
         def get_product_cost_details(sku, marketplace_name):
             try:
-                if marketplace_name and 'walmart' in marketplace_name.lower():
-                    cache_key = f"{sku}_walmart"
-                else:
-                    cache_key = f"{sku}_other"
-                
-                return product_cache.get(cache_key, {
-                    'product_cost': 0.0,
-                    'marketplace_fee': 0.0,
-                    'vendor_funding': 0.0,
-                    'vendor_discount': 0.0
-                })
+                product = Product.objects(sku=sku).first()
+                if product:
+                    if marketplace_name and 'walmart' in marketplace_name.lower():
+                        return {
+                            'product_cost': getattr(product, 'w_product_cost', 0.0) or getattr(product, 'product_cost', 0.0) or getattr(product, 'cogs', 0.0),
+                            'marketplace_fee': getattr(product, 'referral_fee', 0.0) or getattr(product, 'referral_fee', 0.0),
+                            'vendor_funding': getattr(product, 'vendor_funding', 0.0),
+                            'vendor_discount': getattr(product, 'vendor_discount', 0.0)
+                        }
+                    else:  
+                        return {
+                            'product_cost': getattr(product, 'product_cost', 0.0) or getattr(product, 'cogs', 0.0),
+                            'marketplace_fee': getattr(product, 'referral_fee', 0.0),
+                            'vendor_funding': getattr(product, 'vendor_funding', 0.0),
+                            'vendor_discount': getattr(product, 'vendor_discount', 0.0)
+                        }
             except Exception as e:
                 print(f"Error fetching product details for SKU {sku}: {e}")
             return {
@@ -5989,14 +5944,14 @@ async def get_detailed_orders_by_brand_and_date(brands, start_date, end_date):
                 'vendor_funding': 0.0,
                 'vendor_discount': 0.0
             }
-        
         def get_merchant_shipment_cost(order_id):
             try:
-                return merchant_cost_cache.get(order_id, 0.0)
+                order_doc = Order.objects(purchase_order_id=order_id).first()
+                if order_doc:
+                    return getattr(order_doc, 'merchant_shipment_cost', 0.0) or getattr(order_doc, 'shipping_cost', 0.0)
             except Exception as e:
                 print(f" Error fetching merchant cost for Order ID '{order_id}': {e}")
             return 0.0
-        
         pipeline = []
         if match_query:
             pipeline.append({"$match": match_query})
@@ -6036,10 +5991,7 @@ async def get_detailed_orders_by_brand_and_date(brands, start_date, end_date):
             }},
             {"$sort": {"order_date": -1}}
         ])
-        
-        # OPTIMIZATION: Use allowDiskUse for large aggregations
-        orders = list(Order.objects.aggregate(*pipeline, allowDiskUse=True))
-        
+        orders = list(Order.objects.aggregate(*pipeline))
         detailed_rows = []
         pacific_tz = pytz.timezone("US/Pacific")
         for order in orders:
@@ -6103,26 +6055,6 @@ async def get_all_detailed_orders_by_brand_and_date(brands, start_date, end_date
     if not include_custom:
         return regular_orders
     try:
-        # OPTIMIZATION: Pre-fetch all products for custom orders
-        all_products = {}
-        try:
-            products = Product.objects().only(
-                'sku', 'product_cost', 'cogs', 'w_product_cost',
-                'referral_fee', 'walmart_fee', 'vendor_funding', 'vendor_discount'
-            )
-            for p in products:
-                all_products[str(p.id)] = {
-                    'product_cost': getattr(p, 'product_cost', 0.0),
-                    'cogs': getattr(p, 'cogs', 0.0),
-                    'w_product_cost': getattr(p, 'w_product_cost', 0.0),
-                    'referral_fee': getattr(p, 'referral_fee', 0.0),
-                    'walmart_fee': getattr(p, 'walmart_fee', 0.0),
-                    'vendor_funding': getattr(p, 'vendor_funding', 0.0),
-                    'vendor_discount': getattr(p, 'vendor_discount', 0.0)
-                }
-        except Exception as e:
-            print(f"Error pre-fetching products: {e}")
-        
         pipeline = []
         if start_date or end_date:
             date_match = {}
@@ -6169,7 +6101,6 @@ async def get_all_detailed_orders_by_brand_and_date(brands, start_date, end_date
                 "fulfillment_channel": "$fulfillment_type",
                 "customer_name": "$customer_name",
                 "customer_email": "$mail",
-                "product_id": {"$toString": "$product_info._id"},
                 "product_cost_field": {"$round":[{"$ifNull":["$product_info.product_cost",0]},2]},
                 "cogs_field": "$product_info.cogs",
                 "w_product_cost_field": "$product_info.w_product_cost",
@@ -6180,10 +6111,7 @@ async def get_all_detailed_orders_by_brand_and_date(brands, start_date, end_date
             }},
             {"$sort": {"order_date": -1}}
         ])
-        
-        # OPTIMIZATION: Use allowDiskUse for large aggregations
-        custom_orders_raw = list(custom_order.objects.aggregate(*pipeline, allowDiskUse=True))
-        
+        custom_orders_raw = list(custom_order.objects.aggregate(*pipeline))
         custom_orders_detailed = []
         pacific_tz = pytz.timezone("US/Pacific")
         for order in custom_orders_raw:
@@ -6198,25 +6126,12 @@ async def get_all_detailed_orders_by_brand_and_date(brands, start_date, end_date
                     order_date_str = str(order['order_date']) if order['order_date'] else ""
             else:
                 order_date_str = ""
-            
-            # Use cached product data if available
-            product_id = order.get('product_id', '')
-            if product_id in all_products:
-                cached_product = all_products[product_id]
-                product_cost = (cached_product.get('w_product_cost') or 
-                              cached_product.get('product_cost') or 
-                              cached_product.get('cogs') or 0.0)
-                marketplace_fee_rate = (cached_product.get('walmart_fee') or 
-                                      cached_product.get('referral_fee') or 0.0)
-                vendor_funding = cached_product.get('vendor_funding', 0.0)
-            else:
-                product_cost = (order.get('w_product_cost_field') or 
-                              order.get('product_cost_field') or 
-                              order.get('cogs_field') or 0.0)
-                marketplace_fee_rate = (order.get('walmart_fee_field') or 
-                                      order.get('referral_fee_field') or 0.0)
-                vendor_funding = order.get('vendor_funding_field', 0.0)
-            
+            product_cost = (order.get('w_product_cost_field') or 
+                          order.get('product_cost_field') or 
+                          order.get('cogs_field') or 0.0)
+            marketplace_fee_rate = (order.get('walmart_fee_field') or 
+                                  order.get('referral_fee_field') or 0.0)
+            vendor_funding = order.get('vendor_funding_field', 0.0)
             quantity = order.get('quantity', 1)
             unit_price = order.get('unit_price', 0.0)
             marketplace_fee = (unit_price * quantity) 
@@ -6256,7 +6171,6 @@ async def get_all_detailed_orders_by_brand_and_date(brands, start_date, end_date
     except Exception as e:
         print(f"Error getting custom orders: {e}")
         return regular_orders
-    
 @csrf_exempt
 def downloadOrders(request):
     try:
@@ -6269,7 +6183,6 @@ def downloadOrders(request):
         orders = asyncio.run(get_all_detailed_orders_by_brand_and_date(
             brands, start_date, end_date, include_custom
         ))
-        print('ordersserse',orders)
         if not orders:
             return HttpResponse(
                 json.dumps({'error': "No orders found for the given filters"}),
@@ -6355,7 +6268,6 @@ def downloadOrders(request):
                 status=400
             )
     except Exception as e:
-        print('exception',e)
         import traceback
         traceback.print_exc()
         return HttpResponse(
