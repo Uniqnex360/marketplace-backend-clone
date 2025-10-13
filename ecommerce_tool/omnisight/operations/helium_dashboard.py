@@ -3573,9 +3573,6 @@ def getProfitAndLossDetails(request):
 def profit_loss_chart(request):
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
-    country=json_request.get('country','US')
-    filtered_marketplace_id=get_filtered_marketplaces(country,marketplace_id)
-    manufacturer_name = json_request.get('manufacturer_name', [])
     brand_id = json_request.get('brand_id', [])
     product_id = json_request.get('product_id',[])
     manufacturer_name = json_request.get('manufacturer_name',[])
@@ -3589,14 +3586,15 @@ def profit_loss_chart(request):
         from_date, to_date = convertdateTotimezone(start_date,end_date,timezone)
     else:
         from_date, to_date = get_date_range(preset,timezone)
+    
     def get_month_range(year, month):
         start_date = datetime(year, month, 1)
         last_day = monthrange(year, month)[1]
         end_date = datetime(year, month, last_day, 23, 59, 59)
         return start_date, end_date
     
-    def calculate_metrics_optimized(start_date, end_date, filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone,country):
-        result = grossRevenue(start_date, end_date, filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone,country)
+    def calculate_metrics_optimized(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone):
+        result = grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone)
         
         if not result:
             return {
@@ -3783,7 +3781,7 @@ def profit_loss_chart(request):
     current_pacific_time = datetime.now(pacific_tz)
     
     # Determine interval type and keys
-    if start_date and end_date and start_date.date==end_date.date():
+    if start_date and end_date and start_date[:10] == end_date[:10]:
         total_hours = int((to_date - from_date).total_seconds() // 3600) + 1
         interval_keys = []
         for i in range(total_hours):
@@ -3841,8 +3839,8 @@ def profit_loss_chart(request):
             year, month = int(key[:4]), int(key[5:7])
             start, end = get_month_range(year, month)
         
-        data = calculate_metrics_optimized(start, end, filtered_marketplace_id, brand_id, product_id, 
-                                         manufacturer_name, fulfillment_channel, timezone,country)
+        data = calculate_metrics_optimized(start, end, marketplace_id, brand_id, product_id, 
+                                         manufacturer_name, fulfillment_channel, timezone)
         
         values["grossRevenue"][key] = data["grossRevenue"]
         values["expenses"][key] = data["expenses"]
@@ -3857,6 +3855,7 @@ def profit_loss_chart(request):
     graph = [{"metric": metric, "values": values[metric]} for metric in metrics]
     
     return JsonResponse({"graph": graph}, safe=False)
+
 def safe_localize(dt, tz):
     from datetime import datetime
     import pytz
