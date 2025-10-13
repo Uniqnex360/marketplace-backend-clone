@@ -918,6 +918,7 @@ def fetchManualOrderDetails(request):
     else:
         data['error'] = "Manual order not found."
     return data
+
 def ordersCountForDashboard(request):
     from django.utils.timezone import now
     data = dict()
@@ -955,12 +956,16 @@ def ordersCountForDashboard(request):
         "order_status": {"$nin": ["Canceled", "Cancelled"]},
         "order_total": {"$gt": 0}
     }
+    
 
     custom_match_conditions = {
         "purchase_order_date": {"$gte": start_date, "$lte": end_date},
         "order_status": {"$nin": ["Canceled", "Cancelled"]},
         "total_price": {"$gt": 0}
     }
+    if country:
+        match_conditions['geo']=country.upper()
+        custom_match_conditions['geo'] = country.upper()
 
     if brand_ids:
         try:

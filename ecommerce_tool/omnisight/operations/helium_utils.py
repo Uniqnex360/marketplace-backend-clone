@@ -192,7 +192,7 @@ def     get_date_range(preset, time_zone_str="UTC"):
 
 def grossRevenue(start_date, end_date, filtered_marketplace_id=[], brand_id=None,
                  product_id=None, manufacuture_name=[], fulfillment_channel=None,
-                 timezone='UTC'):
+                 timezone='UTC',country=None):
 
     if timezone != 'UTC':
         start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone)
@@ -210,6 +210,8 @@ def grossRevenue(start_date, end_date, filtered_marketplace_id=[], brand_id=None
         'order_status': {"$nin": ["Canceled", "Cancelled"]},
         'order_total': {"$gt": 0}
     }
+    if country:
+        match['geo']=country.upper()
 
     if fulfillment_channel:
         match['fulfillment_channel'] = fulfillment_channel
@@ -497,7 +499,7 @@ def create_empty_bucket_data(time_key):
     }
 from concurrent.futures import ThreadPoolExecutor
 def get_graph_data(start_date, end_date, preset, filtered_marketplace_id, brand_id=None, product_id=None, 
-                  manufacturer_name=None, fulfillment_channel=None, timezone="UTC"):
+                  manufacturer_name=None, fulfillment_channel=None, timezone="UTC",country=None):
     user_timezone = pytz.timezone(timezone) if timezone != 'UTC' else pytz.UTC
     original_start_date = start_date
     original_end_date = end_date
@@ -551,6 +553,9 @@ def get_graph_data(start_date, end_date, preset, filtered_marketplace_id, brand_
             }
         }
     ]
+    if country:
+        pipeline[0]["$match"]["geo"] = country.upper()
+        
 
     # Add marketplace filter
     if filtered_marketplace_id and isinstance(filtered_marketplace_id, list) and len(filtered_marketplace_id) > 0:
@@ -733,7 +738,7 @@ def get_graph_data(start_date, end_date, preset, filtered_marketplace_id, brand_
     return converted_graph_data
 
 
-def totalRevenueCalculation(start_date, end_date, filtered_marketplace_id=[], brand_id=None, product_id=None, manufacturer_name=None, fulfillment_channel=None, timezone_str="UTC"):
+def totalRevenueCalculation(start_date, end_date, filtered_marketplace_id=[], brand_id=None, product_id=None, manufacturer_name=None, fulfillment_channel=None, timezone_str="UTC",country=None):
     total = dict()
     gross_revenue_with_tax = 0
     refund = 0
@@ -750,7 +755,7 @@ def totalRevenueCalculation(start_date, end_date, filtered_marketplace_id=[], br
     ship_promotion_discount=0 
     shipping_price = 0
     channel_fee = 0
-    orders = grossRevenue(start_date, end_date, filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
+    orders = grossRevenue(start_date, end_date, filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str,country)
     refund_ins = refundOrder(start_date, end_date, filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
     if refund_ins:
         for ins in refund_ins:
@@ -860,6 +865,7 @@ def calculate_metricss(
     product_id,
     manufacturer_name,
     fulfillment_channel,
+    country=None,
     timezone='UTC',
     include_extra_fields=False,
     use_threads=True
@@ -890,7 +896,7 @@ def calculate_metricss(
     product_categories = {}  
     product_completeness = {"complete": 0, "incomplete": 0}  
     total_product_cost = 0  
-    result = grossRevenue(from_date, to_date, filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone)
+    result = grossRevenue(from_date, to_date, filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone,country)
     all_item_ids = [ObjectId(item_id) for order in result for item_id in order['order_items']]
     for order in result:
         po_id=order.get('purchase_order_id')

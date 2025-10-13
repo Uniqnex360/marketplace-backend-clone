@@ -1,4 +1,5 @@
 from __future__ import annotations
+from itertools import count
 import pandas as pd
 from ecommerce_tool.util.marketplaces import get_filtered_marketplaces
 from omnisight.decorators import redis_cache
@@ -272,7 +273,7 @@ def get_metrics_by_date_range(request):
     graph_data = {}
     def process_date_range(key, date_range, results):
         gross_revenue_with_tax = 0
-        result = grossRevenue(date_range["start"], date_range["end"], filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
+        result = grossRevenue(date_range["start"], date_range["end"], filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str,country)
         if result != []:
             for ins in result:
                 original_order_total = ins.get('original_order_total', 0.0) 
@@ -291,7 +292,7 @@ def get_metrics_by_date_range(request):
     all_order_item_ids = set()
     all_raw_results = {}
     for key, date_range in date_filters.items():
-        raw_result = grossRevenue(date_range["start"], date_range["end"], filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
+        raw_result = grossRevenue(date_range["start"], date_range["end"], filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str,country)
         result=[
             r for r in raw_result
             if r.get('order_status') not in ['Cancelled','Canceled'] and r.get('order_total')>0
@@ -749,12 +750,12 @@ def updatedRevenueWidgetAPIView(request):
     def fetch_total():
         return totalRevenueCalculation(
             start_date, end_date, filtered_marketplace_id, brand_id,
-            product_id, manufacturer_name, fulfillment_channel, timezone_str
+            product_id, manufacturer_name, fulfillment_channel, timezone_str,country
         )
     def fetch_graph_data():
         return get_graph_data(
             start_date, end_date, preset, filtered_marketplace_id, brand_id,
-            product_id, manufacturer_name, fulfillment_channel, timezone_str
+            product_id, manufacturer_name, fulfillment_channel, timezone_str,country
         )
     def fetch_compare_total():
         return totalRevenueCalculation(
@@ -1716,13 +1717,13 @@ def getPeriodWiseData(request):
                 calculate_metricss,
                 job["current_start"], job["current_end"],
                 filtered_marketplace_id, brand_id, product_id, manufacturer_name,
-                fulfillment_channel, timezone_str, False, True
+                fulfillment_channel,country, timezone_str,False, True
             )
             futures[f"{period_key}_previous"] = executor.submit(
                 calculate_metricss,
                 job["previous_start"], job["previous_end"],
                 filtered_marketplace_id, brand_id, product_id, manufacturer_name,
-                fulfillment_channel, timezone_str, False, True
+                fulfillment_channel, country,timezone_str, False, True
             )
 
         results = {key: f.result() for key, f in futures.items()}
@@ -1988,49 +1989,49 @@ def getPeriodWiseDataCustom(request):
         future_today_current = executor.submit(
             calculate_metricss, 
             today_start, today_end, 
-            filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
+            filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,country,
             timezone_str
         )
         future_today_previous = executor.submit(
             calculate_metricss, 
             yesterday_start, yesterday_end, 
-            filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
+            filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,country,
             timezone_str, False, True
         )
         future_yesterday_current = executor.submit(
             calculate_metricss, 
             yesterday_start, yesterday_end, 
-            filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
+            filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,country,
             timezone_str, False, True
         )
         future_yesterday_previous = executor.submit(
             calculate_metricss, 
             day_before_yesterday_start, day_before_yesterday_end, 
-            filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
+            filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,country,
             timezone_str, False, True
         )
         future_last7_current = executor.submit(
             calculate_metricss, 
             last7_start, last7_end, 
-            filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
+            filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,country,
             timezone_str, False, True
         )
         future_last7_previous = executor.submit(
             calculate_metricss, 
             last7_prev_start, last7_prev_end, 
-            filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
+            filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,country,
             timezone_str, False, True
         )
         future_custom_current = executor.submit(
             calculate_metricss, 
             from_date, to_date, 
-            filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
+            filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,country,
             timezone_str, False, True
         )
         future_custom_previous = executor.submit(
             calculate_metricss, 
             prev_from, prev_to, 
-            filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
+            filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,country,
             timezone_str, False, True
         )
         today_current = future_today_current.result()
@@ -2318,8 +2319,8 @@ def allMarketplaceData(request):
             "shipping_cost": 0
     }
     def create_period_response(cur_from, cur_to, prev_from, prev_to):
-        current_orders = grossRevenue(cur_from, cur_to, filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
-        previous_orders = grossRevenue(prev_from, prev_to, filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
+        current_orders = grossRevenue(cur_from, cur_to, filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str,country)
+        previous_orders = grossRevenue(prev_from, prev_to, filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str,country)
         current = calculate_metrics(current_orders)
         previous = calculate_metrics(previous_orders)
         def with_delta(metric):
@@ -2737,7 +2738,7 @@ def getProductPerformanceSummary(request):
     previous_day_start_date = previous_day_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
     previous_day_end_date = previous_day_start_date.replace(hour=23, minute=59, second=59)
     def fetch_data(start_date, end_date):
-        return grossRevenue(start_date, end_date, filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,timezone_str)
+        return grossRevenue(start_date, end_date, filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,timezone_str,country)
     with ThreadPoolExecutor(max_workers=2) as executor:
         future_prev_data = executor.submit(fetch_data, previous_day_start_date, previous_day_end_date)
         future_yes_data = executor.submit(fetch_data, yesterday_start_date, yesterday_end_date)
@@ -3390,14 +3391,14 @@ def getProfitAndLossDetails(request):
     else:
         from_date, to_date = get_date_range(preset, timezone)  
     def pLcalculate_metrics(start_date, end_date, filtered_marketplace_id, brand_id, product_id,
-                            manufacturer_name, fulfillment_channel, timezone):
+                            manufacturer_name, fulfillment_channel, timezone,country):
         gross_revenue = total_cogs = refund = net_profit = margin = total_units = 0
         shipping_cost = channel_fee = product_cost = vendor_funding = tax_price = promotion_discount= ship_promotion_discount=temp_price = vendor_discount=0
         sku_set = set()
         product_categories = {}
         product_completeness = {"complete": 0, "incomplete": 0}
         result = grossRevenue(start_date, end_date, filtered_marketplace_id, brand_id, product_id,
-                              manufacturer_name, fulfillment_channel, timezone)
+                              manufacturer_name, fulfillment_channel, timezone,country)
         all_item_ids = []
         for order in result:
             all_item_ids.extend(order['order_items'])
@@ -3493,11 +3494,11 @@ def getProfitAndLossDetails(request):
         }
     def create_period_response(label, cur_from, cur_to, prev_from, prev_to,
                                filtered_marketplace_id, brand_id, product_id,
-                               manufacturer_name, fulfillment_channel, preset, timezone):
+                               manufacturer_name, fulfillment_channel, preset, timezone,country):
         current = pLcalculate_metrics(cur_from, cur_to, filtered_marketplace_id, brand_id, product_id,
-                                      manufacturer_name, fulfillment_channel, timezone)
+                                      manufacturer_name, fulfillment_channel, timezone,country)
         previous = pLcalculate_metrics(prev_from, prev_to, filtered_marketplace_id, brand_id, product_id,
-                                       manufacturer_name, fulfillment_channel, timezone)
+                                       manufacturer_name, fulfillment_channel, timezone,country)
         def with_delta(metric):
             return {
                 "current": current[metric],
@@ -3564,7 +3565,7 @@ def getProfitAndLossDetails(request):
     response_data = {
         "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date,
                                           filtered_marketplace_id, brand_id, product_id, manufacturer_name,
-                                          fulfillment_channel, preset, timezone)
+                                          fulfillment_channel, preset, timezone,country)
     }
     return JsonResponse(response_data, safe=False)
 
@@ -3594,8 +3595,8 @@ def profit_loss_chart(request):
         end_date = datetime(year, month, last_day, 23, 59, 59)
         return start_date, end_date
     
-    def calculate_metrics_optimized(start_date, end_date, filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone):
-        result = grossRevenue(start_date, end_date, filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone)
+    def calculate_metrics_optimized(start_date, end_date, filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone,country):
+        result = grossRevenue(start_date, end_date, filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone,country)
         
         if not result:
             return {
@@ -3841,7 +3842,7 @@ def profit_loss_chart(request):
             start, end = get_month_range(year, month)
         
         data = calculate_metrics_optimized(start, end, filtered_marketplace_id, brand_id, product_id, 
-                                         manufacturer_name, fulfillment_channel, timezone)
+                                         manufacturer_name, fulfillment_channel, timezone,country)
         
         values["grossRevenue"][key] = data["grossRevenue"]
         values["expenses"][key] = data["expenses"]
@@ -5892,7 +5893,6 @@ def priceGraph(request):
             "price": round(price, 2)
         })
     return response_data
-
 async def get_detailed_orders_by_brand_and_date(brands, start_date, end_date):
     try:
         start_datetime, end_datetime = None, None
@@ -5903,6 +5903,7 @@ async def get_detailed_orders_by_brand_and_date(brands, start_date, end_date):
         if end_date:
             dt = datetime.strptime(end_date, '%Y-%m-%d')
             end_datetime = pacific_tz.localize(dt.replace(hour=23, minute=59, second=59))
+        
         match_query = {}
         date_conditions = {}
         if start_datetime:
@@ -5911,6 +5912,7 @@ async def get_detailed_orders_by_brand_and_date(brands, start_date, end_date):
             date_conditions["$lte"] = end_datetime
         if date_conditions:
             match_query["order_date"] = date_conditions
+        
         if brands:
             brand_object_ids = [ObjectId(b) for b in brands if len(b) == 24]
             products_in_brands = Product.objects(brand_id__in=brand_object_ids).only('id')
@@ -5918,43 +5920,95 @@ async def get_detailed_orders_by_brand_and_date(brands, start_date, end_date):
             order_items_with_products = OrderItems.objects(ProductDetails__product_id__in=product_ids_from_brands).only('id')
             order_item_ids = [oi.id for oi in order_items_with_products]
             match_query["order_items"] = {"$in": order_item_ids}
-        def get_product_cost_details(sku, marketplace_name):
-            try:
-                product = Product.objects(sku=sku).first()
-                if product:
-                    if marketplace_name and 'walmart' in marketplace_name.lower():
-                        return {
-                            'product_cost': getattr(product, 'w_product_cost', 0.0) or getattr(product, 'product_cost', 0.0) or getattr(product, 'cogs', 0.0),
-                            'marketplace_fee': getattr(product, 'referral_fee', 0.0) or getattr(product, 'referral_fee', 0.0),
-                            'vendor_funding': getattr(product, 'vendor_funding', 0.0),
-                            'vendor_discount': getattr(product, 'vendor_discount', 0.0)
+        
+        # Pre-fetch all products and create a lookup cache to avoid N queries in the loop
+        product_cache = {}
+        if brands:
+            products = Product.objects(brand_id__in=brand_object_ids).only(
+                'sku', 'product_cost', 'cogs', 'w_product_cost', 
+                'referral_fee', 'vendor_funding', 'vendor_discount'
+            )
+            for product in products:
+                product_cache[product.sku] = {
+                    'product_cost': getattr(product, 'product_cost', 0.0) or 0.0,
+                    'cogs': getattr(product, 'cogs', 0.0) or 0.0,
+                    'w_product_cost': getattr(product, 'w_product_cost', 0.0) or 0.0,
+                    'referral_fee': getattr(product, 'referral_fee', 0.0) or 0.0,
+                    'vendor_funding': getattr(product, 'vendor_funding', 0.0) or 0.0,
+                    'vendor_discount': getattr(product, 'vendor_discount', 0.0) or 0.0
+                }
+        else:
+            # If no brand filter, we still need to cache products based on SKUs from results
+            # We'll do this in two passes
+            pass
+        
+        # Pre-fetch merchant shipment costs
+        merchant_cost_cache = {}
+        
+        def get_product_cost_details_cached(sku, marketplace_name):
+            if sku not in product_cache:
+                # Fallback: fetch if not in cache
+                try:
+                    product = Product.objects(sku=sku).only(
+                        'product_cost', 'cogs', 'w_product_cost', 
+                        'referral_fee', 'vendor_funding', 'vendor_discount'
+                    ).first()
+                    if product:
+                        product_cache[sku] = {
+                            'product_cost': getattr(product, 'product_cost', 0.0) or 0.0,
+                            'cogs': getattr(product, 'cogs', 0.0) or 0.0,
+                            'w_product_cost': getattr(product, 'w_product_cost', 0.0) or 0.0,
+                            'referral_fee': getattr(product, 'referral_fee', 0.0) or 0.0,
+                            'vendor_funding': getattr(product, 'vendor_funding', 0.0) or 0.0,
+                            'vendor_discount': getattr(product, 'vendor_discount', 0.0) or 0.0
                         }
-                    else:  
-                        return {
-                            'product_cost': getattr(product, 'product_cost', 0.0) or getattr(product, 'cogs', 0.0),
-                            'marketplace_fee': getattr(product, 'referral_fee', 0.0),
-                            'vendor_funding': getattr(product, 'vendor_funding', 0.0),
-                            'vendor_discount': getattr(product, 'vendor_discount', 0.0)
+                    else:
+                        product_cache[sku] = {
+                            'product_cost': 0.0, 'cogs': 0.0, 'w_product_cost': 0.0,
+                            'referral_fee': 0.0, 'vendor_funding': 0.0, 'vendor_discount': 0.0
                         }
-            except Exception as e:
-                print(f"Error fetching product details for SKU {sku}: {e}")
-            return {
-                'product_cost': 0.0,
-                'marketplace_fee': 0.0,
-                'vendor_funding': 0.0,
-                'vendor_discount': 0.0
-            }
-        def get_merchant_shipment_cost(order_id):
-            try:
-                order_doc = Order.objects(purchase_order_id=order_id).first()
-                if order_doc:
-                    return getattr(order_doc, 'merchant_shipment_cost', 0.0) or getattr(order_doc, 'shipping_cost', 0.0)
-            except Exception as e:
-                print(f" Error fetching merchant cost for Order ID '{order_id}': {e}")
-            return 0.0
+                except Exception as e:
+                    print(f"Error fetching product details for SKU {sku}: {e}")
+                    product_cache[sku] = {
+                        'product_cost': 0.0, 'cogs': 0.0, 'w_product_cost': 0.0,
+                        'referral_fee': 0.0, 'vendor_funding': 0.0, 'vendor_discount': 0.0
+                    }
+            
+            prod_data = product_cache[sku]
+            if marketplace_name and 'walmart' in marketplace_name.lower():
+                return {
+                    'product_cost': prod_data['w_product_cost'] or prod_data['product_cost'] or prod_data['cogs'],
+                    'marketplace_fee': prod_data['referral_fee'],
+                    'vendor_funding': prod_data['vendor_funding'],
+                    'vendor_discount': prod_data['vendor_discount']
+                }
+            else:
+                return {
+                    'product_cost': prod_data['product_cost'] or prod_data['cogs'],
+                    'marketplace_fee': prod_data['referral_fee'],
+                    'vendor_funding': prod_data['vendor_funding'],
+                    'vendor_discount': prod_data['vendor_discount']
+                }
+        
+        def get_merchant_shipment_cost_cached(order_id):
+            if order_id not in merchant_cost_cache:
+                try:
+                    order_doc = Order.objects(purchase_order_id=order_id).only('merchant_shipment_cost', 'shipping_cost').first()
+                    if order_doc:
+                        merchant_cost_cache[order_id] = getattr(order_doc, 'merchant_shipment_cost', 0.0) or getattr(order_doc, 'shipping_cost', 0.0)
+                    else:
+                        merchant_cost_cache[order_id] = 0.0
+                except Exception as e:
+                    print(f"Error fetching merchant cost for Order ID '{order_id}': {e}")
+                    merchant_cost_cache[order_id] = 0.0
+            return merchant_cost_cache[order_id]
+        
         pipeline = []
         if match_query:
             pipeline.append({"$match": match_query})
+        
+        pipeline.append({"$sort": {"order_date": -1}})
+        
         pipeline.extend([
             {"$unwind": {"path": "$order_items", "preserveNullAndEmptyArrays": True}},
             {"$lookup": {"from": "order_items", "localField": "order_items", "foreignField": "_id", "as": "order_item_details"}},
@@ -5988,12 +6042,23 @@ async def get_detailed_orders_by_brand_and_date(brands, start_date, end_date):
                 "fulfillment_channel": "$fulfillment_channel",
                 "customer_name": {"$ifNull": ["$customer_name", ""]},
                 "customer_email": {"$ifNull": ["$customer_email_id", ""]},
-            }},
-            {"$sort": {"order_date": -1}}
+            }}
         ])
-        orders = list(Order.objects.aggregate(*pipeline))
+        
+        orders = list(Order.objects.aggregate(*pipeline, allowDiskUse=True))
+        
+        # First pass: collect all unique purchase_order_ids for batch fetching
+        unique_order_ids = list(set([order.get('purchase_order_id', '') for order in orders if order.get('purchase_order_id')]))
+        
+        # Batch fetch all merchant costs
+        if unique_order_ids:
+            order_docs = Order.objects(purchase_order_id__in=unique_order_ids).only('purchase_order_id', 'merchant_shipment_cost', 'shipping_cost')
+            for order_doc in order_docs:
+                merchant_cost_cache[order_doc.purchase_order_id] = getattr(order_doc, 'merchant_shipment_cost', 0.0) or getattr(order_doc, 'shipping_cost', 0.0)
+        
         detailed_rows = []
         pacific_tz = pytz.timezone("US/Pacific")
+        
         for order in orders:
             if order.get('order_date'):
                 try:
@@ -6006,18 +6071,23 @@ async def get_detailed_orders_by_brand_and_date(brands, start_date, end_date):
                     order_date_str = str(order['order_date']) if order['order_date'] else ""
             else:
                 order_date_str = ""
+            
             sku = order.get('sku', '')
             marketplace_name = order.get('marketplace_name', '')
-            cost_details = get_product_cost_details(sku, marketplace_name)
-            merchant_shipping_cost = get_merchant_shipment_cost(order.get('purchase_order_id', ''))
+            cost_details = get_product_cost_details_cached(sku, marketplace_name)
+            
+            purchase_order_id = order.get('purchase_order_id', '')
+            merchant_shipping_cost = merchant_cost_cache.get(purchase_order_id, 0.0)
+            
             quantity = order.get('quantity', 1)
             unit_price = order.get('unit_price', 0.0)
             marketplace_fee = cost_details['marketplace_fee'] * quantity
             line_total = round((unit_price * quantity) + order.get('item_tax', 0),2)
             line_product_cost = cost_details['product_cost'] * quantity
             line_vendor_funding = cost_details['vendor_funding'] * quantity
+            
             detailed_row = {
-                "Order ID": order.get('purchase_order_id', order.get('order_id', '')),
+                "Order ID": purchase_order_id or order.get('order_id', ''),
                 "Customer ID": order.get('customer_order_id', ''),
                 "Order Date": order_date_str,
                 "SKU": sku,
@@ -6045,15 +6115,20 @@ async def get_detailed_orders_by_brand_and_date(brands, start_date, end_date):
                 "Ship-promotion Discount":order.get('ship_promotion_discount',0.0)
             }
             detailed_rows.append(detailed_row)
+        
         return detailed_rows
     except Exception as e:
         print(f"Error in get_detailed_orders_by_brand_and_date: {e}")
+        import traceback
+        traceback.print_exc()
         return []
-    
+
+
 async def get_all_detailed_orders_by_brand_and_date(brands, start_date, end_date, include_custom=False):
     regular_orders = await get_detailed_orders_by_brand_and_date(brands, start_date, end_date)
     if not include_custom:
         return regular_orders
+    
     try:
         pipeline = []
         if start_date or end_date:
@@ -6072,6 +6147,9 @@ async def get_all_detailed_orders_by_brand_and_date(brands, start_date, end_date
                     "purchase_order_date": date_match
                 }
             })
+        
+        pipeline.append({"$sort": {"purchase_order_date": -1}})
+        
         pipeline.extend([
             {"$unwind": {"path": "$ordered_products", "preserveNullAndEmptyArrays": True}},
             {"$lookup": {"from": "product", "localField": "ordered_products.product_id", "foreignField": "_id", "as": "product_info"}},
@@ -6108,12 +6186,14 @@ async def get_all_detailed_orders_by_brand_and_date(brands, start_date, end_date
                 "walmart_fee_field": "$product_info.walmart_fee",
                 "vendor_funding_field": "$product_info.vendor_funding",
                 "vendor_discount_field": "$product_info.vendor_discount"
-            }},
-            {"$sort": {"order_date": -1}}
+            }}
         ])
-        custom_orders_raw = list(custom_order.objects.aggregate(*pipeline))
+        
+        custom_orders_raw = list(custom_order.objects.aggregate(*pipeline, allowDiskUse=True))
+        
         custom_orders_detailed = []
         pacific_tz = pytz.timezone("US/Pacific")
+        
         for order in custom_orders_raw:
             if order.get('order_date'):
                 try:
@@ -6126,6 +6206,7 @@ async def get_all_detailed_orders_by_brand_and_date(brands, start_date, end_date
                     order_date_str = str(order['order_date']) if order['order_date'] else ""
             else:
                 order_date_str = ""
+            
             product_cost = (order.get('w_product_cost_field') or 
                           order.get('product_cost_field') or 
                           order.get('cogs_field') or 0.0)
@@ -6136,6 +6217,7 @@ async def get_all_detailed_orders_by_brand_and_date(brands, start_date, end_date
             unit_price = order.get('unit_price', 0.0)
             marketplace_fee = (unit_price * quantity) 
             merchant_shipping = order.get('shipping_price', 0.0)
+            
             custom_order_row = {
                 "Order ID": order.get('purchase_order_id', order.get('order_id', '')),
                 "Customer ID": order.get('customer_order_id', ''),
@@ -6165,11 +6247,14 @@ async def get_all_detailed_orders_by_brand_and_date(brands, start_date, end_date
                 "Ship-promotion Discount":order.get('ship_promotion_discount',0.0)
             }
             custom_orders_detailed.append(custom_order_row)
+        
         all_orders = regular_orders + custom_orders_detailed
         all_orders.sort(key=lambda x: x.get('Order Date', ''), reverse=True)
         return all_orders
     except Exception as e:
         print(f"Error getting custom orders: {e}")
+        import traceback
+        traceback.print_exc()
         return regular_orders
 @csrf_exempt
 def downloadOrders(request):
@@ -6180,9 +6265,11 @@ def downloadOrders(request):
         end_date = data.get("end_date")
         file_format = data.get("format", 'csv')
         include_custom = data.get("include_custom", False)
+        print(f"Starting order download for date range: {start_date} to {end_date}")
         orders = asyncio.run(get_all_detailed_orders_by_brand_and_date(
             brands, start_date, end_date, include_custom
         ))
+        print(f"Retrieved {len(orders)} orders")
         if not orders:
             return HttpResponse(
                 json.dumps({'error': "No orders found for the given filters"}),

@@ -140,6 +140,7 @@ class Product(Document):
             ['marketplace_id', 'manufacturer_name']
         ]
     }
+  
 class CachedMetrics(Document):
     cache_hash = StringField(required=True, unique=True)
     marketplace_id = ReferenceField(Marketplace, null=True) 
