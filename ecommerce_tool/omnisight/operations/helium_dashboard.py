@@ -3575,6 +3575,8 @@ def profit_loss_chart(request):
     marketplace_id = json_request.get('marketplace_id', None)
     brand_id = json_request.get('brand_id', [])
     product_id = json_request.get('product_id',[])
+    country=json_request.get('country',"US")
+    filtered_marketplace_id=get_filtered_marketplaces(country,marketplace_id)
     manufacturer_name = json_request.get('manufacturer_name',[])
     fulfillment_channel = json_request.get('fulfillment_channel',None)
     preset = json_request.get('preset')
@@ -3593,8 +3595,8 @@ def profit_loss_chart(request):
         end_date = datetime(year, month, last_day, 23, 59, 59)
         return start_date, end_date
     
-    def calculate_metrics_optimized(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone):
-        result = grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone)
+    def calculate_metrics_optimized(start_date, end_date, filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone,country):
+        result = grossRevenue(start_date, end_date, filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone,country)
         
         if not result:
             return {
@@ -3839,8 +3841,8 @@ def profit_loss_chart(request):
             year, month = int(key[:4]), int(key[5:7])
             start, end = get_month_range(year, month)
         
-        data = calculate_metrics_optimized(start, end, marketplace_id, brand_id, product_id, 
-                                         manufacturer_name, fulfillment_channel, timezone)
+        data = calculate_metrics_optimized(start, end, filtered_marketplace_id, brand_id, product_id, 
+                                         manufacturer_name, fulfillment_channel, timezone,country)
         
         values["grossRevenue"][key] = data["grossRevenue"]
         values["expenses"][key] = data["expenses"]

@@ -15,7 +15,7 @@ if project_root not in sys.path:
 
 from omnisight.models import Order, OrderItems, Marketplace, Product, ProductDetails, Pricing, Money, Fulfillment, OrderStatus, TaxCollection, BuyerInfo
 
-EXCEL_PATH = "/home/lexicon/Downloads/Sep-21-revised-3.xlsx"
+EXCEL_PATH = "/home/lexicon/Downloads/orders_and_items_export_20251006_223508 (1) (2).xlsx"
 
 
 DATABASE_HOST = 'mongodb+srv://techteam:WcblsEme1Q1Vv7Rt@cluster0.5hrxigl.mongodb.net/ecommerce_db?retryWrites=true&w=majority&appName=Cluster0'
