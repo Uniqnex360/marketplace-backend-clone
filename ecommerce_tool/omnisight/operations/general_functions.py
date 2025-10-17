@@ -595,7 +595,7 @@ def fetchOrderDetails(request):
                         data["merchant_shipment_cost"] = shipment_cost
         order_items_ids = data.get("order_items", [])
         if order_items_ids:
-            order_items = DatabaseModel.list_documents(OrderItems.objects,{"id__in" : order_items_ids})
+            order_items = DatabaseModel.list_documents(OrderItems.objects, filters={"id__in": order_items_ids})
             serialized_items = []
             for item in order_items:
                 serialized_item = {
