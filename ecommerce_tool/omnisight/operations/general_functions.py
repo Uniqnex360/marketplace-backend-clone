@@ -1216,7 +1216,7 @@ def salesAnalytics(request):
         filtered_marketplace_id=get_filtered_marketplaces(country,marketplace_id)
         start_date = json_request.get('start_date')  
         end_date = json_request.get('end_date')  
-        timezone_str = json_request.get('timezone', 'US/Pacific')
+        timezone_str = 'US/Pacific'
         brand_id_list = json_request.get('brand_id')
         preset = json_request.get("preset", "Today")     
         product_id_list = json_request.get('product_id')
@@ -1233,7 +1233,8 @@ def salesAnalytics(request):
             filtered_marketplace_id=filtered_marketplace_id, 
             brand_id=brand_id_list, 
             timezone=timezone_str,
-            product_id=product_id_list
+            product_id=product_id_list,
+            country=country
         )
         orders = [o for o in orders if o.get('order_status') not in ['Cancelled','Canceled'] and o.get('order_total', 0) > 0]
         data['total_sales'] = sum(o['original_order_total'] for o in orders)
@@ -2002,6 +2003,8 @@ def fetchInventryList(request):
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id')
     skip = int(json_request.get('skip'))
+    country=json_request.get('country','US')
+    filtered_marketplace_id=get_filtered_marketplaces(country,marketplace_id)
     limit = int(json_request.get('limit'))
     search_query = json_request.get('search_query')   
     sort_by = json_request.get('sort_by')
@@ -2011,6 +2014,10 @@ def fetchInventryList(request):
     match = {}
     if marketplace_id != None and marketplace_id != "" and marketplace_id != "all":
         match['marketplace_id'] = ObjectId(marketplace_id)
+    if marketplace_id and marketplace_id != "all":
+        match["marketplace_id"] = ObjectId(marketplace_id)
+    elif marketplace_id == "all" and filtered_marketplace_id:
+        match["marketplace_id"] = { "$in": filtered_marketplace_id }
     if search_query != None and search_query != "":
         search_query = re.escape(search_query.strip())
         match["$or"] = [

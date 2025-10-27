@@ -23,7 +23,7 @@ def get_filtered_marketplaces(countries=None, marketplace_id=None):
 
         if isinstance(countries, list) and len(countries) > 0:
             country = countries[0].upper()
-            if country not in ['US', 'UK']:
+            if country not in ['US', 'UK',"AU"]:
                 raise ValueError("Country must be US or UK")
 
             marketplaces = Marketplace.objects.filter(country__in=[country])
