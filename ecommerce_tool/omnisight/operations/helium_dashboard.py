@@ -3730,6 +3730,126 @@ def getProfitAndLossDetails(request):
     }
     return JsonResponse(response_data, safe=False)
 
+def calculate_metrics_from_preloaded_data(orders, item_lookup):
+    if not orders:
+        return {
+            "grossRevenue": 0,
+            "expenses": 0,
+            "netProfit": 0,
+            "roi": 0,
+            "unitsSold": 0,
+            "refunds": 0,
+            "skuCount": 0,
+            "margin": 0,
+            "tax_price": 0,
+            "total_cogs": 0,
+            "product_cost": 0,
+            "productCategories": {},
+            "productCompleteness": {"complete": 0, "incomplete": 0}
+        }
+    
+    # Initialize variables
+    gross_revenue = 0
+    total_cogs = 0
+    temp_price = 0
+    tax_price = 0
+    channel_fee = 0
+    vendor_funding = 0
+    vendor_discount = 0
+    shipping_cost = 0
+    promotion_discount = 0
+    ship_promotion_discount = 0
+    total_units = 0
+    total_product_cost = 0
+    sku_set = set()
+    product_categories = {}
+    product_completeness = {"complete": 0, "incomplete": 0}
+    
+    # Process each order
+    for order in orders:
+        gross_revenue += order.get("original_order_total", 0)
+        total_units += order.get('items_order_quantity', 0)
+        shipping_cost += order.get('shipping_price', 0) or 0
+        
+        # Process order items
+        for item_id in order.get("order_items", []):
+            item_data = item_lookup.get(item_id)
+            if not item_data:
+                continue
+            
+            # Price calculation
+            price = item_data.get('price', 0) or 0
+            if price == 0 and 'charges' in item_data:
+                price = sum(float(charge.get('chargeAmount', 0)) for charge in item_data['charges'])
+            
+            temp_price += price
+            tax_price += item_data.get('tax_price', 0) or 0
+            promotion_discount += item_data.get('promotion_discount', 0) or 0
+            ship_promotion_discount += item_data.get('ship_promotion_discount', 0) or 0
+            
+            # Product cost calculation
+            product_cost = float(item_data.get('product_cost', 0) or 0.0)
+            quantity = int(item_data.get('QuantityOrdered', 0) or 0)
+            total_cogs += product_cost * quantity
+            total_product_cost += product_cost * quantity
+            
+            vendor_funding += (item_data.get('vendor_funding', 0) or 0) * quantity
+            vendor_discount += item_data.get('vendor_discount', 0) or 0
+            
+            sku = item_data.get("sku")
+            if sku:
+                sku_set.add(sku)
+            
+            category = item_data.get("category", "Unknown")
+            product_categories[category] = product_categories.get(category, 0) + 1
+            
+            # Channel fee calculation
+            channel_fee += float(item_data.get("referral_fee", 0) or 0) * quantity
+            
+            # Product completeness check
+            if item_data.get("price") and item_data.get("product_cost") and sku:
+                product_completeness["complete"] += 1
+            else:
+                product_completeness["incomplete"] += 1
+        
+        # Merchant shipment cost calculation
+        fulfillment_channel_order = order.get('fulfillment_channel', "")
+        merchant_shipment_cost = order.get('merchant_shipment_cost', 0)
+        
+        if merchant_shipment_cost is None:
+            if fulfillment_channel_order == "AFN":
+                merchant_shipment_cost = order.get('shipping_price', 0) or 0
+            elif fulfillment_channel_order == 'MFN':
+                merchant_shipment_cost = order.get('merchant_shipment_cost', 0)
+            elif fulfillment_channel_order == "SellerFulfilled":
+                merchant_shipment_cost = order.get('merchant_shipment_cost', 0)
+        else:
+            merchant_shipment_cost = merchant_shipment_cost or 0
+        
+        total_cogs += merchant_shipment_cost
+    
+    # Final calculations
+    expenses = total_cogs + channel_fee
+    net_profit = (temp_price + shipping_cost + promotion_discount + vendor_funding - (channel_fee + total_cogs + vendor_discount + ship_promotion_discount))
+    margin = (net_profit / gross_revenue) * 100 if gross_revenue else 0
+    roi = (net_profit / total_cogs) * 100 if total_cogs else 0
+    
+    return {
+        "grossRevenue": round(gross_revenue, 2),
+        "expenses": round(expenses, 2),
+        "netProfit": round(net_profit, 2),
+        "roi": round(roi, 2),
+        "unitsSold": total_units,
+        "refunds": 0,
+        "skuCount": len(sku_set),
+        "margin": round(margin, 2),
+        "tax_price": tax_price,
+        "total_cogs": total_cogs,
+        "product_cost": total_product_cost,
+        "productCategories": product_categories,
+        "productCompleteness": product_completeness
+    }
+    
 @csrf_exempt
 def profit_loss_chart(request):
     json_request = JSONParser().parse(request)
@@ -3776,12 +3896,10 @@ def profit_loss_chart(request):
                 "productCompleteness": {"complete": 0, "incomplete": 0}
             }
         
-        # Extract all item IDs from orders
         all_item_ids = []
         for order in result:
             all_item_ids.extend(order.get("order_items", []))
         
-        # Build aggregation pipeline - CORRECTED to match getProfitAndLossDetails
         item_pipeline = [
             {"$match": {"_id": {"$in": all_item_ids}}},
             {
@@ -3816,36 +3934,32 @@ def profit_loss_chart(request):
         all_items = list(OrderItems.objects.aggregate(*item_pipeline))
         item_lookup = {item['_id']: item for item in all_items}
         
-        # Initialize variables - CORRECTED naming and initialization
         gross_revenue = 0
         total_cogs = 0
-        temp_price = 0  # This represents the base item price total
+        temp_price = 0  
         tax_price = 0
-        channel_fee = 0  # CORRECTED: renamed from referral_fee_total for consistency
+        channel_fee = 0  
         vendor_funding = 0
         vendor_discount = 0
         shipping_cost = 0
         promotion_discount=0
         ship_promotion_discount=0
         total_units = 0
-        total_product_cost = 0  # CORRECTED: separate tracking of product costs
+        total_product_cost = 0  
         sku_set = set()
         product_categories = {}
         product_completeness = {"complete": 0, "incomplete": 0}
         
-        # Process each order - CORRECTED logic to match getProfitAndLossDetails
         for order in result:
-            gross_revenue += order.get("original_order_total", 0)  # CORRECTED: use original_order_total
+            gross_revenue += order.get("original_order_total", 0) 
             total_units += order.get('items_order_quantity', 0)
             shipping_cost += order.get('shipping_price', 0) or 0
             
-            # Process order items
             for item_id in order.get("order_items", []):
                 item_data = item_lookup.get(item_id)
                 if not item_data:
                     continue
                 
-                # CORRECTED: Price calculation logic
                 price = item_data.get('price', 0) or 0
                 if price == 0 and 'charges' in item_data:
                     price = sum(float(charge.get('chargeAmount', 0)) for charge in item_data['charges'])
@@ -3856,7 +3970,6 @@ def profit_loss_chart(request):
                 ship_promotion_discount+=item_data.get('ship_promotion_discount',0)or 0
                 
                 
-                # CORRECTED: Product cost calculation
                 product_cost = float(item_data.get('product_cost', 0) or 0.0)
                 quantity = int(item_data.get('QuantityOrdered', 0) or 0)
                 total_cogs += product_cost * quantity
@@ -3872,16 +3985,13 @@ def profit_loss_chart(request):
                 category = item_data.get("category", "Unknown")
                 product_categories[category] = product_categories.get(category, 0) + 1
                 
-                # CORRECTED: Channel fee calculation
                 channel_fee += float(item_data.get("referral_fee", 0) or 0)*quantity
                 
-                # Product completeness check
                 if item_data.get("price") and item_data.get("product_cost") and sku:
                     product_completeness["complete"] += 1
                 else:
                     product_completeness["incomplete"] += 1
             
-            # CORRECTED: Merchant shipment cost calculation to match getProfitAndLossDetails
             fulfillment_channel_order = order.get('fulfillment_channel', "")
             merchant_shipment_cost = order.get('merchant_shipment_cost', 0)
             
@@ -3897,7 +4007,6 @@ def profit_loss_chart(request):
             
             total_cogs += merchant_shipment_cost
         
-        # CORRECTED: Final calculations to match getProfitAndLossDetails
         expenses = total_cogs + channel_fee
         net_profit = (temp_price + shipping_cost+promotion_discount + vendor_funding - (channel_fee + total_cogs + vendor_discount+ship_promotion_discount))
         margin = (net_profit / gross_revenue) * 100 if gross_revenue else 0
@@ -3914,7 +4023,7 @@ def profit_loss_chart(request):
             "margin": round(margin, 2),
             "tax_price": tax_price,
             "total_cogs": total_cogs,
-            "product_cost": total_product_cost,  # CORRECTED: actual product cost instead of gross revenue
+            "product_cost": total_product_cost,  
             "productCategories": product_categories,
             "productCompleteness": product_completeness
         }
@@ -3931,7 +4040,6 @@ def profit_loss_chart(request):
         
         return months
     
-    # Rest of the function remains the same for chart generation
     metrics = ["grossRevenue", "estimatedPayout", "expenses", "netProfit", "units", "ppcSales"]
     values = {metric: {} for metric in metrics}
     
@@ -3943,7 +4051,6 @@ def profit_loss_chart(request):
     pacific_tz = pytz_timezone('US/Pacific')
     current_pacific_time = datetime.now(pacific_tz)
     
-    # Determine interval type and keys
     if start_date and end_date and start_date[:10] == end_date[:10]:
         total_hours = int((to_date - from_date).total_seconds() // 3600) + 1
         interval_keys = []
@@ -3990,33 +4097,113 @@ def profit_loss_chart(request):
             )
             interval_type = "month"
     
-    # Calculate metrics for each interval
-    for key in interval_keys:
-        if interval_type == "hour":
-            start = datetime.strptime(key, "%Y-%m-%d %H:00:00")
-            end = start + timedelta(hours=1) - timedelta(seconds=1)
-        elif interval_type == "day":
-            start = datetime.strptime(key, "%Y-%m-%d 00:00:00")
-            end = start + timedelta(days=1) - timedelta(seconds=1)
-        else:  
-            year, month = int(key[:4]), int(key[5:7])
-            start, end = get_month_range(year, month)
+    # for key in interval_keys:
+    #     if interval_type == "hour":
+    #         start = datetime.strptime(key, "%Y-%m-%d %H:00:00")
+    #         end = start + timedelta(hours=1) - timedelta(seconds=1)
+    #     elif interval_type == "day":
+    #         start = datetime.strptime(key, "%Y-%m-%d 00:00:00")
+    #         end = start + timedelta(days=1) - timedelta(seconds=1)
+    #     else:  
+    #         year, month = int(key[:4]), int(key[5:7])
+    #         start, end = get_month_range(year, month)
         
-        data = calculate_metrics_optimized(start, end, filtered_marketplace_id, brand_id, product_id, 
-                                         manufacturer_name, fulfillment_channel, timezone,country)
+    #     data = calculate_metrics_optimized(start, end, filtered_marketplace_id, brand_id, product_id, 
+    #                                      manufacturer_name, fulfillment_channel, timezone,country)
         
-        values["grossRevenue"][key] = data["grossRevenue"]
-        values["expenses"][key] = data["expenses"]
-        values["netProfit"][key] = data["netProfit"]
-        values["units"][key] = data["unitsSold"]
-    
-    # Ensure all metrics have values for all keys
+    #     values["grossRevenue"][key] = data["grossRevenue"]
+    #     values["expenses"][key] = data["expenses"]
+    #     values["netProfit"][key] = data["netProfit"]
+    #     values["units"][key] = data["unitsSold"]
+    # Single query for entire date range
+    all_orders = grossRevenue(from_date, to_date, filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone, country)
+    print(f"DEBUG: Date range: {from_date} to {to_date}")
+    print(f"DEBUG: Found {len(all_orders) if all_orders else 0} orders")
+    if all_orders:
+        print(f"DEBUG: First order date: {all_orders[0].get('purchase_date')}")
+        print(f"DEBUG: Sample order: {all_orders[0]}")
+        
+        # Get all item IDs once
+        all_item_ids = []
+        for order in all_orders:
+            all_item_ids.extend(order.get("order_items", []))
+        
+        # Single item lookup query
+        item_pipeline = [
+            {"$match": {"_id": {"$in": all_item_ids}}},
+            {
+           "$lookup": {
+                    "from": "product",
+                    "localField": "ProductDetails.product_id", 
+                    "foreignField": "_id",
+                    "as": "product_ins"
+                }
+            },
+            {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
+            {
+                "$project": {
+                    "_id": 1,
+                    "price": "$Pricing.ItemPrice.Amount",
+                    "tax_price": "$Pricing.ItemTax.Amount",
+                    "sku": "$product_ins.sku",
+                    "category": "$product_ins.category",
+                    "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
+                    'promotion_discount':{"$ifNull":["$Pricing.PromotionDiscount.Amount",0]},
+                    'ship_promotion_discount':{"$ifNull":["$Pricing.ShipPromotionDiscount.Amount",0]},
+                    "vendor_discount": {"$ifNull": ["$product_ins.vendor_discount", 0]},
+                    "referral_fee": {"$round":[{"$ifNull": ["$product_ins.referral_fee", 0]},2]},
+                    "product_cost": {"$round":[{"$ifNull": ["$product_ins.product_cost", 0]},2]},
+                    "QuantityOrdered": {"$ifNull": ["$ProductDetails.QuantityOrdered", 1]},
+                }
+            }
+        ]
+        
+        all_items = list(OrderItems.objects.aggregate(*item_pipeline))
+        item_lookup = {item['_id']: item for item in all_items}
+        
+        # Group orders by interval and calculate metrics
+        for key in interval_keys:
+            # Filter orders for this interval
+            if interval_type == "hour":
+                start = datetime.strptime(key, "%Y-%m-%d %H:00:00")
+                end = start + timedelta(hours=1) - timedelta(seconds=1)
+            elif interval_type == "day":
+                start = datetime.strptime(key, "%Y-%m-%d 00:00:00")
+                end = start + timedelta(days=1) - timedelta(seconds=1)
+            else:
+                year, month = int(key[:4]), int(key[5:7])
+                start, end = get_month_range(year, month)
+            
+            interval_orders = []
+            for order in all_orders:
+                order_date = order.get('order_date')
+                if order_date:
+                    if hasattr(order_date, 'tzinfo') and order_date.tzinfo:
+                        order_date = order_date.replace(tzinfo=None)
+                    if start <= order_date <= end:
+                        interval_orders.append(order)
+            
+            # Calculate metrics using existing logic but with pre-loaded data
+            data = calculate_metrics_from_preloaded_data(interval_orders, item_lookup)
+            
+            values["grossRevenue"][key] = data["grossRevenue"]
+            values["expenses"][key] = data["expenses"] 
+            values["netProfit"][key] = data["netProfit"]
+            values["units"][key] = data["unitsSold"]
+    else:
+        # Set all values to 0 if no orders
+        for key in interval_keys:
+            values["grossRevenue"][key] = 0
+            values["expenses"][key] = 0
+            values["netProfit"][key] = 0
+            values["units"][key] = 0
+        
     for metric in metrics:
         for key in interval_keys:
             values[metric].setdefault(key, 0)
-    
+        
     graph = [{"metric": metric, "values": values[metric]} for metric in metrics]
-    
+        
     return JsonResponse({"graph": graph}, safe=False)
 
 def safe_localize(dt, tz):
