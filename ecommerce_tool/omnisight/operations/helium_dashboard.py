@@ -1574,69 +1574,216 @@ def get_individual_products(match, page, page_size, start_date, end_date,
         "tab_type": "sku"
     }
     return JsonResponse(response_data, safe=False)
-
 def batch_get_sales_data_optimized(product_ids, start_date, end_date, today_start_date, today_end_date):
     if not product_ids:
         return {}
-
-    from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
-
-
+    
+    from datetime import datetime
+    import pytz
+    
+    # Convert string dates to datetime objects and normalize timezone
+    def ensure_datetime(date_obj):
+        if isinstance(date_obj, str):
+            try:
+                # Try parsing ISO format first
+                dt = datetime.fromisoformat(date_obj.replace('Z', '+00:00'))
+            except:
+                try:
+                    # Try standard format
+                    dt = datetime.strptime(date_obj, '%Y-%m-%d %H:%M:%S')
+                except:
+                    # Try date only format
+                    dt = datetime.strptime(date_obj, '%Y-%m-%d')
+        else:
+            dt = date_obj
+        
+        # Make timezone-naive if it has timezone info
+        if dt.tzinfo is not None:
+            dt = dt.replace(tzinfo=None)
+        
+        return dt
+    
+    # Ensure all dates are timezone-naive datetime objects
+    start_date = ensure_datetime(start_date)
+    end_date = ensure_datetime(end_date)
+    today_start_date = ensure_datetime(today_start_date)
+    today_end_date = ensure_datetime(today_end_date)
+    
     compare_start, compare_end = getPreviousDateRange(start_date, end_date)
+    compare_start = ensure_datetime(compare_start)
+    compare_end = ensure_datetime(compare_end)
+    
+    # Single aggregation pipeline for ALL products and ALL date ranges
+    pipeline = [
+        {
+            "$match": {
+                "product_id": {"$in": product_ids},
+                "purchase_date": {
+                    "$gte": min(today_start_date, compare_start),
+                    "$lte": max(today_end_date, compare_end)
+                }
+            }
+        },
+        {
+            "$addFields": {
+                "date_category": {
+                    "$switch": {
+                        "branches": [
+                            {
+                                "case": {
+                                    "$and": [
+                                        {"$gte": ["$purchase_date", today_start_date]},
+                                        {"$lte": ["$purchase_date", today_end_date]}
+                                    ]
+                                },
+                                "then": "today"
+                            },
+                            {
+                                "case": {
+                                    "$and": [
+                                        {"$gte": ["$purchase_date", start_date]},
+                                        {"$lte": ["$purchase_date", end_date]}
+                                    ]
+                                },
+                                "then": "period"
+                            },
+                            {
+                                "case": {
+                                    "$and": [
+                                        {"$gte": ["$purchase_date", compare_start]},
+                                        {"$lte": ["$purchase_date", compare_end]}
+                                    ]
+                                },
+                                "then": "compare"
+                            }
+                        ],
+                        "default": "other"
+                    }
+                }
+            }
+        },
+        {
+            "$match": {"date_category": {"$ne": "other"}}
+        },
+        {
+            "$group": {
+                "_id": {
+                    "product_id": "$product_id",
+                    "date_category": "$date_category"
+                },
+                "total_revenue": {"$sum": "$total_price"},
+                "total_units": {"$sum": "$total_quantity"}
+            }
+        },
+        {
+            "$group": {
+                "_id": "$_id.product_id",
+                "data": {
+                    "$push": {
+                        "category": "$_id.date_category",
+                        "revenue": "$total_revenue",
+                        "units": "$total_units"
+                    }
+                }
+            }
+        }
+    ]
+    
+    results = list(OrderItems.objects.aggregate(*pipeline))
+    
+    # Transform results
     sales_data = {}
-
-    # Adjust based on profiling
-    max_workers = 20
-    timeout_per_product = 5  # Seconds
-
-    def get_data(product_id):
-        try:
-            return product_id, get_single_product_sales(
-                product_id,
-                today_start_date,
-                today_end_date,
-                start_date,
-                end_date,
-                compare_start,
-                compare_end
-            )
-        except Exception as e:
-            logger.warning(
-                f"Sales data fetch failed for product {product_id}: {str(e)}",
-                exc_info=True
-            )
-            return product_id, {
+    for result in results:
+        product_id = result["_id"]
+        data_dict = {
+            "today": {"revenue": 0, "units": 0},
+            "period": {"revenue": 0, "units": 0},
+            "compare": {"revenue": 0, "units": 0}
+        }
+        
+        for item in result["data"]:
+            category = item["category"]
+            if category in data_dict:
+                data_dict[category] = {
+                    "revenue": item["revenue"],
+                    "units": item["units"]
+                }
+        
+        sales_data[product_id] = data_dict
+    
+    # Fill in missing products
+    for product_id in product_ids:
+        if product_id not in sales_data:
+            sales_data[product_id] = {
                 "today": {"revenue": 0, "units": 0},
                 "period": {"revenue": 0, "units": 0},
                 "compare": {"revenue": 0, "units": 0}
             }
-
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_product = {
-            executor.submit(get_data, product_id): product_id for product_id in product_ids
-        }
-
-        for future in as_completed(future_to_product, timeout=(len(product_ids) * timeout_per_product)):
-            product_id = future_to_product[future]
-            try:
-                pid, data = future.result(timeout=timeout_per_product)
-                sales_data[pid] = data
-            except TimeoutError:
-                logger.error(f"Timeout for product {product_id}")
-                sales_data[product_id] = {
-                    "today": {"revenue": 0, "units": 0},
-                    "period": {"revenue": 0, "units": 0},
-                    "compare": {"revenue": 0, "units": 0}
-                }
-            except Exception as e:
-                logger.exception(f"Unexpected error retrieving sales data for product {product_id}")
-                sales_data[product_id] = {
-                    "today": {"revenue": 0, "units": 0},
-                    "period": {"revenue": 0, "units": 0},
-                    "compare": {"revenue": 0, "units": 0}
-                }
-
+    
     return sales_data
+
+# def batch_get_sales_data_optimized(product_ids, start_date, end_date, today_start_date, today_end_date):
+#     if not product_ids:
+#         return {}
+
+#     from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
+
+
+#     compare_start, compare_end = getPreviousDateRange(start_date, end_date)
+#     sales_data = {}
+
+#     # Adjust based on profiling
+#     max_workers = 20
+#     timeout_per_product = 5  # Seconds
+
+#     def get_data(product_id):
+#         try:
+#             return product_id, get_single_product_sales(
+#                 product_id,
+#                 today_start_date,
+#                 today_end_date,
+#                 start_date,
+#                 end_date,
+#                 compare_start,
+#                 compare_end
+#             )
+#         except Exception as e:
+#             logger.warning(
+#                 f"Sales data fetch failed for product {product_id}: {str(e)}",
+#                 exc_info=True
+#             )
+#             return product_id, {
+#                 "today": {"revenue": 0, "units": 0},
+#                 "period": {"revenue": 0, "units": 0},
+#                 "compare": {"revenue": 0, "units": 0}
+#             }
+
+#     with ThreadPoolExecutor(max_workers=max_workers) as executor:
+#         future_to_product = {
+#             executor.submit(get_data, product_id): product_id for product_id in product_ids
+#         }
+
+#         for future in as_completed(future_to_product, timeout=(len(product_ids) * timeout_per_product)):
+#             product_id = future_to_product[future]
+#             try:
+#                 pid, data = future.result(timeout=timeout_per_product)
+#                 sales_data[pid] = data
+#             except TimeoutError:
+#                 logger.error(f"Timeout for product {product_id}")
+#                 sales_data[product_id] = {
+#                     "today": {"revenue": 0, "units": 0},
+#                     "period": {"revenue": 0, "units": 0},
+#                     "compare": {"revenue": 0, "units": 0}
+#                 }
+#             except Exception as e:
+#                 logger.exception(f"Unexpected error retrieving sales data for product {product_id}")
+#                 sales_data[product_id] = {
+#                     "today": {"revenue": 0, "units": 0},
+#                     "period": {"revenue": 0, "units": 0},
+#                     "compare": {"revenue": 0, "units": 0}
+#                 }
+
+#     return sales_data
 
 def get_single_product_sales(product_id, today_start_date, today_end_date, 
                            start_date, end_date, compare_start, compare_end):
