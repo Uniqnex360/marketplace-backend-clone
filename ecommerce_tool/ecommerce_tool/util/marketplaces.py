@@ -2,13 +2,7 @@ from omnisight.models import Marketplace
 from bson import ObjectId
 
 
-def get_filtered_marketplaces(countries=None, marketplace_id=None):
-    """
-    Filter marketplaces by country or marketplace_id
-    Args:
-        countries: Can be a string ('US', 'UK') or list of strings (['US', 'UK'])
-        marketplace_id: Specific marketplace ID or 'all'
-    """
+def get_filtered_marketplaces(countries=None, marketplace_id=None): 
 
     if marketplace_id and marketplace_id != 'all':
         try:
@@ -23,7 +17,7 @@ def get_filtered_marketplaces(countries=None, marketplace_id=None):
 
         if isinstance(countries, list) and len(countries) > 0:
             country = countries[0].upper()
-            if country not in ['US', 'UK',"AU"]:
+            if country not in ['US', 'UK',"AU",'UAE']:
                 raise ValueError("Country must be US or UK")
 
             marketplaces = Marketplace.objects.filter(country__in=[country])

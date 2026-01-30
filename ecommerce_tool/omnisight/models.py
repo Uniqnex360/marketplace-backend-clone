@@ -38,10 +38,12 @@ class Manufacturer(Document):
     description = StringField()  # Manufacturer description
     website = StringField()  # Manufacturer website
     marketplace_id = ReferenceField(Marketplace)  # Reference to the marketplace
+    
 class Product(Document):
     # General Product Details
     product_title = StringField()
     wpid = StringField()  
+    net_profit=IntField(default=0)
     product_description = StringField()
     product_id = DynamicField()  # Can store ASIN, UPC, GTIN, WPID
     product_id_type = StringField()
@@ -491,6 +493,7 @@ class SyncStatus(Document):
 class authenticated_api(Document):
     name = StringField()
     allowed_roles = ListField(ReferenceField(role))
+    created_at = DateTimeField()
 class CityDetails(Document):
     city = StringField(max_length=100)
     city_ascii = StringField(max_length=100)

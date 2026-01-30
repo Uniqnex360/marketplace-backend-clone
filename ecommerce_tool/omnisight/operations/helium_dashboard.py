@@ -5,7 +5,6 @@ from ecommerce_tool.util.santize_input import sanitize_value
 from ecommerce_tool.util.marketplaces import get_filtered_marketplaces
 from omnisight.decorators import redis_cache
 from omnisight.operations.core_calculator import EcommerceCalculator
-from omnisight.decorators import redis_cache
 from mongoengine import Q
 from omnisight.models import OrderItems,Order,Marketplace,Product,CityDetails,user,notes_data,chooseMatrix,Fee,Refund,Brand,inventry_log,productPriceChange
 from mongoengine.queryset.visitor import Q
@@ -212,7 +211,7 @@ def sanitize_data(data):
 # load_baseline_data()
 
 @csrf_exempt
-@redis_cache(timeout=86400,key_prefix='get_metrics_by_date_range')
+# @redis_cache(timeout=86400,key_prefix='get_metrics_by_date_range')
 def get_metrics_by_date_range(request):
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
@@ -226,6 +225,7 @@ def get_metrics_by_date_range(request):
     print('COUNTTRYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY',country)
     filtered_marketplace_id=get_filtered_marketplaces(country,marketplace_id)
     print("FILTERED MARKETPLACE DDDDDDDDDDDDDDDDDD",filtered_marketplace_id)
+    print(f"DEBUG: marketplace_id={marketplace_id}, country={country}, type={type(filtered_marketplace_id)}")
     preset=json_request.get('preset','Today')
     start_date_str=json_request.get("start_date",None)
     end_date_str=json_request.get('end_date',None)
@@ -275,6 +275,7 @@ def get_metrics_by_date_range(request):
     def process_date_range(key, date_range, results):
         gross_revenue_with_tax = 0
         result = grossRevenue(date_range["start"], date_range["end"], filtered_marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str,country)
+        
         if result != []:
             for ins in result:
                 original_order_total = ins.get('original_order_total', 0.0) 
@@ -485,7 +486,7 @@ def get_metrics_by_date_range(request):
     return metrics
 
 @csrf_exempt
-@redis_cache(timeout=86400,key_prefix='LatestOrdersTodayAPIView')
+# @redis_cache(timeout=86400,key_prefix='LatestOrdersTodayAPIView')
 def LatestOrdersTodayAPIView(request):
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
@@ -727,7 +728,7 @@ def RevenueWidgetAPIView(request):
     return data
 
 @csrf_exempt
-@redis_cache(timeout=86400,key_prefix='updatedRevenueWidgetAPIView')
+# @redis_cache(timeout=86400,key_prefix='updatedRevenueWidgetAPIView')
 def updatedRevenueWidgetAPIView(request):
     json_request = JSONParser().parse(request)
     preset = json_request.get("preset", "Today")
@@ -1065,7 +1066,7 @@ def getPreviousDateRange(start_date, end_date):
     return previous_start_date.strftime("%Y-%m-%d"), previous_end_date.strftime("%Y-%m-%d")
 
 @csrf_exempt
-@redis_cache(timeout=86400,key_prefix='get_products_with_pagination')
+# @redis_cache(timeout=86400,key_prefix='get_products_with_pagination')
 def get_products_with_pagination(request):
     # return main(request)
     json_request = JSONParser().parse(request)
@@ -1822,7 +1823,7 @@ def clean_json_floats(obj):
     return obj
 
 @csrf_exempt
-@redis_cache(timeout=86400,key_prefix='getPeriodWiseData')
+# @redis_cache(timeout=86400,key_prefix='getPeriodWiseData')
 def getPeriodWiseData(request):
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -2061,7 +2062,7 @@ def exportPeriodWiseCSV(request):
     writer.writerows(period_rows)
     return response
 @csrf_exempt
-@redis_cache(timeout=86400,key_prefix='getPeriodWiseDataCustom')
+# @redis_cache(timeout=86400,key_prefix='getPeriodWiseDataCustom')
 def getPeriodWiseDataCustom(request):
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -2225,7 +2226,7 @@ def getPeriodWiseDataCustom(request):
     return JsonResponse(response_data, safe=False)
 
 @csrf_exempt
-@redis_cache(timeout=86400,key_prefix='allMarketplaceData')
+# @redis_cache(timeout=86400,key_prefix='allMarketplaceData')
 def allMarketplaceData(request):
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
@@ -2878,7 +2879,7 @@ def sales(orders):
     return sku_summary
 
 @csrf_exempt
-@redis_cache(timeout=86400,key_prefix='getProductPerformanceSummary')
+# @redis_cache(timeout=86400,key_prefix='getProductPerformanceSummary')
 def getProductPerformanceSummary(request):
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
