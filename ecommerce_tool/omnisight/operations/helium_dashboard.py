@@ -211,7 +211,7 @@ def sanitize_data(data):
 # load_baseline_data()
 
 @csrf_exempt
-# @redis_cache(timeout=86400,key_prefix='get_metrics_by_date_range')
+@redis_cache(timeout=86400,key_prefix='get_metrics_by_date_range')
 def get_metrics_by_date_range(request):
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
@@ -486,7 +486,7 @@ def get_metrics_by_date_range(request):
     return metrics
 
 @csrf_exempt
-# @redis_cache(timeout=86400,key_prefix='LatestOrdersTodayAPIView')
+@redis_cache(timeout=86400,key_prefix='LatestOrdersTodayAPIView')
 def LatestOrdersTodayAPIView(request):
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
@@ -728,7 +728,7 @@ def RevenueWidgetAPIView(request):
     return data
 
 @csrf_exempt
-# @redis_cache(timeout=86400,key_prefix='updatedRevenueWidgetAPIView')
+@redis_cache(timeout=86400,key_prefix='updatedRevenueWidgetAPIView')
 def updatedRevenueWidgetAPIView(request):
     json_request = JSONParser().parse(request)
     preset = json_request.get("preset", "Today")
@@ -1066,7 +1066,7 @@ def getPreviousDateRange(start_date, end_date):
     return previous_start_date.strftime("%Y-%m-%d"), previous_end_date.strftime("%Y-%m-%d")
 
 @csrf_exempt
-# @redis_cache(timeout=86400,key_prefix='get_products_with_pagination')
+@redis_cache(timeout=86400,key_prefix='get_products_with_pagination')
 def get_products_with_pagination(request):
     # return main(request)
     json_request = JSONParser().parse(request)
@@ -1823,7 +1823,7 @@ def clean_json_floats(obj):
     return obj
 
 @csrf_exempt
-# @redis_cache(timeout=86400,key_prefix='getPeriodWiseData')
+@redis_cache(timeout=86400,key_prefix='getPeriodWiseData')
 def getPeriodWiseData(request):
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -2062,7 +2062,7 @@ def exportPeriodWiseCSV(request):
     writer.writerows(period_rows)
     return response
 @csrf_exempt
-# @redis_cache(timeout=86400,key_prefix='getPeriodWiseDataCustom')
+@redis_cache(timeout=86400,key_prefix='getPeriodWiseDataCustom')
 def getPeriodWiseDataCustom(request):
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -2226,7 +2226,7 @@ def getPeriodWiseDataCustom(request):
     return JsonResponse(response_data, safe=False)
 
 @csrf_exempt
-# @redis_cache(timeout=86400,key_prefix='allMarketplaceData')
+@redis_cache(timeout=86400,key_prefix='allMarketplaceData')
 def allMarketplaceData(request):
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
@@ -2879,7 +2879,7 @@ def sales(orders):
     return sku_summary
 
 @csrf_exempt
-# @redis_cache(timeout=86400,key_prefix='getProductPerformanceSummary')
+@redis_cache(timeout=86400,key_prefix='getProductPerformanceSummary')
 def getProductPerformanceSummary(request):
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
@@ -5246,7 +5246,7 @@ def getSKUlist(request):
     return sku_list
 
 @csrf_exempt
-# @redis_cache(timeout=900,key_prefix='getproductIdlist')
+@redis_cache(timeout=900,key_prefix='getproductIdlist')
 def getproductIdlist(request):
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id')
