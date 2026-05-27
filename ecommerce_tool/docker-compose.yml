@@ -3,6 +3,7 @@ version: '3.9'
 services:
   app:
     build: .
+    # command: python manage.py runserver 0.0.0.0:8000
     command: gunicorn ecommerce_tool.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 60
     ports:
       - "8000:8000"
@@ -12,8 +13,8 @@ services:
       - DEBUG=1
       # - REDIS_HOST=redis
       # - REDIS_PASSWORD=foobaredUniqnex
-    depends_on:
-      - redis
+    # depends_on:
+    #   - redis
 
   # redis:
   #   image: redis:7

@@ -17,6 +17,7 @@ class Marketplace(Document):
     image_url = StringField()  # Marketplace logo URL
     created_at = StringField()  # Timestamp when the marketplace was added
     updated_at = StringField()  # Timestamp when the marketplace was last updated
+    
 class Category(Document):
     name = StringField(required=True)  # Category name
     parent_category_id = ReferenceField('self', null=True)  # Parent category (if applicable)
@@ -484,6 +485,7 @@ class SyncStatus(Document):
     }
 class authenticated_api(Document):
     name = StringField()
+    created_at = DateTimeField()
     allowed_roles = ListField(ReferenceField(role))
 class CityDetails(Document):
     city = StringField(max_length=100)

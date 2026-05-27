@@ -800,6 +800,7 @@ def updatedRevenueWidgetAPIView(request):
                 if not item_result.get(field, True):
                     data['total'].pop(field, None)
     return data
+
 @csrf_exempt
 def get_top_products(request):
     json_request = JSONParser().parse(request)
@@ -2136,7 +2137,7 @@ def allMarketplaceData(request):
                     promotion_discount+=float(item_data.get('promotion_discount',0) or 0)
                     ship_promotion_discount+=float(item_data.get('ship_promotion_discount',0) or 0)
                     referral_fee_total += referral_fee*quantity
-                    tax_price += item_data['tax_price']
+                    tax_price += float(item_data.get('tax_price') or 0)
                     product_cost = float(item_data.get('product_cost', 0) or 0)
                     total_cogs += product_cost * quantity
                     total_units+=quantity
@@ -2248,7 +2249,7 @@ def allMarketplaceData(request):
                 total_units+=quantity
                 referral_fee = float(item_data.get('referral_fee', 0) or 0)
                 referral_fee_total += referral_fee*quantity
-                tax_price += item_data['tax_price']
+                tax_price += float(item_data.get('tax_price') or 0)
                 marketplace_name = order.get("marketplace_name", "Amazon")
                 total_cogs+=product_cost*quantity
                 vendor_funding += item_data['vendor_funding']*quantity
@@ -2389,7 +2390,7 @@ def allMarketplaceDataxl(request):
                     if item_result:
                         item_data = item_result[0]
                         temp_price += item_data['price']
-                        tax_price += item_data['tax_price']
+                        tax_price += float(item_data.get('tax_price') or 0)
                         if order['marketplace_name'] == "Amazon":
                             total_cogs += item_data['total_cogs'] 
                         else:
@@ -2512,7 +2513,7 @@ def downloadMarketplaceDataCSV(request):
                     if item_result:
                         item_data = item_result[0]
                         temp_price += item_data['price']
-                        tax_price += item_data['tax_price']
+                        tax_price += float(item_data.get('tax_price') or 0)
                         if order['marketplace_name'] == "Amazon":
                             total_cogs += item_data['total_cogs'] 
                         else:
@@ -2612,7 +2613,7 @@ def sales(orders):
                 id = item_data.get("id")
                 product_name = item_data.get("product_name", "")
                 product_id = item_data.get("product_id", "")
-                tax_price += item_data['tax_price']
+                tax_price += float(item_data.get('tax_price') or 0)
                 images = item_data.get("images", [])
                 price = item_data.get("price", 0.0)
                 if order['marketplace_name'] == "Amazon":
@@ -3254,7 +3255,7 @@ def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,ma
                     item_data = item_result[0]
                     quantity = int(item_data.get('QuantityOrdered', 1) or 1)
                     temp_price += item_data['price']
-                    tax_price += item_data['tax_price']
+                    tax_price += float(item_data.get('tax_price') or 0)
                     if order['marketplace_name'] == "Amazon":
                         total_cogs += item_data['total_cogs'] 
                     else:
@@ -3368,13 +3369,13 @@ def getProfitAndLossDetails(request):
                 if price == 0 and 'charges' in item_data:
                     price = sum(float(charge.get('chargeAmount',0)) for charge in item_data['charges'])
                 temp_price += price
-                tax_price += item_data['tax_price']
+                tax_price += float(item_data.get('tax_price', 0) or 0)
                 product_cost = float(item_data.get('product_cost', 0) or 0.0)
                 quantity = int(item_data.get('QuantityOrdered', 0) or 0)
                 total_cogs += product_cost * quantity
                 promotion_discount+=float(item_data.get('promotion_discount',0) or 0)
                 ship_promotion_discount+=float(item_data.get('ship_promotion_discount',0) or 0)
-                vendor_funding += item_data['vendor_funding']*quantity
+                vendor_funding += float(item_data.get('vendor_funding', 0) or 0) * quantity
                 vendor_discount+=item_data['vendor_discount']
                 sku_set.add(item_data.get('sku'))
                 category = item_data.get('category', 'Unknown')
@@ -5191,7 +5192,7 @@ def getProfitAndLossDetailsForProduct(request):
                     if item_result:
                         item_data = item_result[0]
                         temp_price += item_data['price']
-                        tax_price += item_data['tax_price']
+                        tax_price += float(item_data.get('tax_price') or 0)
                         if order['marketplace_name'] == "Amazon":
                             total_cogs += item_data['total_cogs']
                             shipping_cost += item_data['a_shipping_cost']
