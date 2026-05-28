@@ -26,4 +26,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the application
 COPY . .
 
-CMD ["gunicorn", "ecommerce_tool.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "1", "--timeout", "60", "--reload"]
+CMD ["gunicorn", "ecommerce_tool.wsgi:application",
+     "--bind", "0.0.0.0:8000",
+     "--workers", "2",
+     "--timeout", "60",
+     "--access-logfile", "-",
+     "--error-logfile", "-",
+     "--log-level", "debug"]
