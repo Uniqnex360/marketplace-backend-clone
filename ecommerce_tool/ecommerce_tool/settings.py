@@ -25,7 +25,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv('SECRET_KEY')
+SECRET_KEY = os.getenv("SECRET_KEY")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -55,44 +55,44 @@ CSRF_TRUSTED_ORIGINS = [
     "https://dev-marketplace.duckdns.org",
     "https://prod-marketplace.duckdns.org",
     "https://marketplace-frontend-development.vercel.app",
-    "https://marketplace-integration-app.vercel.app", 
-    "https://b2bop.netlify.app"
+    "https://marketplace-integration-app.vercel.app",
+    "https://b2bop.netlify.app",
 ]
 
 
 CORS_ALLOW_HEADERS = list(default_headers) + [
-    'content-type',
-    'authorization',
-    'x-requested-with',
-    'accept',
-    'origin',
-    'user-agent',
-    'x-csrftoken',
+    "content-type",
+    "authorization",
+    "x-requested-with",
+    "accept",
+    "origin",
+    "user-agent",
+    "x-csrftoken",
 ]
 
 CORS_ALLOW_METHODS = [
-    'DELETE',
-    'GET',
-    'OPTIONS',
-    'PATCH',
-    'POST',
-    'PUT',
+    "DELETE",
+    "GET",
+    "OPTIONS",
+    "PATCH",
+    "POST",
+    "PUT",
 ]
 
 # Application definition
 INSTALLED_APPS = [
-    'django.contrib.admin',
-    'django.contrib.auth',
-    'django.contrib.contenttypes',
-    'django.contrib.sessions',
-    'django.contrib.messages',
-    'django.contrib.staticfiles',
-    'rest_framework',
-    'corsheaders',
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
+    "rest_framework",
+    "corsheaders",
     "rest_framework_simplejwt",
-    'django_celery_beat',
-    'omnisight',
-] 
+    "django_celery_beat",
+    "omnisight",
+]
 # CACHES = {
 #     'default': {
 #         "BACKEND": "django_redis.cache.RedisCache",
@@ -105,37 +105,37 @@ INSTALLED_APPS = [
 #     }
 # }
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',  # MUST be first
-    'django.middleware.security.SecurityMiddleware',
+    "corsheaders.middleware.CorsMiddleware",  # MUST be first
+    "django.middleware.security.SecurityMiddleware",
     # 'ecommerce_tool.custom_mideleware.LogResponseTimeMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
-    'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'ecommerce_tool.custom_mideleware.customMiddleware'  # custom middleware
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "ecommerce_tool.custom_mideleware.customMiddleware",  # custom middleware
 ]
 
-ROOT_URLCONF = 'ecommerce_tool.urls'
+ROOT_URLCONF = "ecommerce_tool.urls"
 
 TEMPLATES = [
     {
-        'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
-        'APP_DIRS': True,
-        'OPTIONS': {
-            'context_processors': [
-                'django.template.context_processors.debug',
-                'django.template.context_processors.request',
-                'django.contrib.auth.context_processors.auth',
-                'django.contrib.messages.context_processors.messages',
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [],
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.debug",
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
             ],
         },
     },
 ]
 
-WSGI_APPLICATION = 'ecommerce_tool.wsgi.application'
+WSGI_APPLICATION = "ecommerce_tool.wsgi.application"
 
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
@@ -151,16 +151,16 @@ WSGI_APPLICATION = 'ecommerce_tool.wsgi.application'
 #             # 'authSource': 'admin',  # Required if using authentication
 #         }
 #     }
-# } 
+# }
 
 # MongoDB connection settings for mongoengine
 from mongoengine import connect
 
 connect(
-    db=os.getenv('DATABASE_NAME'),
+    db=os.getenv("DATABASE_NAME"),
     # username=os.getenv('DATABASE_USER'),
     # password=os.getenv('DATABASE_PASSWORD'),
-    host=os.getenv('DATABASE_HOST'),
+    host=os.getenv("DATABASE_HOST"),
     # alias='default'
 )
 
@@ -169,25 +169,25 @@ connect(
 
 AUTH_PASSWORD_VALIDATORS = [
     {
-        'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
+        "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
+        "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
     },
 ]
 
 # Internationalization
 # https://docs.djangoproject.com/en/4.2/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = "en-us"
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = "UTC"
 
 USE_I18N = True
 
@@ -196,12 +196,12 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = "static/"
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
 
-DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # REST_FRAMEWORK = {
 #     'DEFAULT_AUTHENTICATION_CLASSES': (
@@ -217,32 +217,48 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # API Keys and External Service Configuration
 
 # WALMART API KEYS
-WALMART_API_KEY = os.getenv('WALMART_API_KEY')
-WALMART_SECRET_KEY = os.getenv('WALMART_SECRET_KEY')
+WALMART_API_KEY = os.getenv("WALMART_API_KEY")
+WALMART_SECRET_KEY = os.getenv("WALMART_SECRET_KEY")
 
 # AMAZON API KEYS
-AMAZON_API_KEY = os.getenv('AMAZON_API_KEY')
-AMAZON_SECRET_KEY = os.getenv('AMAZON_SECRET_KEY')
-REFRESH_TOKEN = os.getenv('AMAZON_REFRESH_TOKEN')
-MARKETPLACE_ID = os.getenv('MARKETPLACE_ID')
-SELLER_ID = os.getenv('SELLER_ID')
+AMAZON_API_KEY = os.getenv("AMAZON_API_KEY")
+AMAZON_SECRET_KEY = os.getenv("AMAZON_SECRET_KEY")
+REFRESH_TOKEN = os.getenv("AMAZON_REFRESH_TOKEN")
+MARKETPLACE_ID = os.getenv("MARKETPLACE_ID")
+SELLER_ID = os.getenv("SELLER_ID")
 
-Role_ARN = os.getenv('Role_ARN')
-Acccess_Key = os.getenv('Acccess_Key')
-Secret_Access_Key = os.getenv('Secret_Access_Key')
+Role_ARN = os.getenv("Role_ARN")
+Acccess_Key = os.getenv("Acccess_Key")
+Secret_Access_Key = os.getenv("Secret_Access_Key")
 
 # SENDGRID API KEYS
-SENDGRID_API_KEY = os.getenv('SENDGRID_API_KEY')
+SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY")
 
 # Sellercloud API credentials
-SELLERCLOUD_USERNAME = os.getenv('SELLERCLOUD_USERNAME')
-SELLERCLOUD_PASSWORD = os.getenv('SELLERCLOUD_PASSWORD')
-SELLERCLOUD_COMPANY_ID = os.getenv('SELLERCLOUD_COMPANY_ID')  # Replace with your actual company ID
-SELLERCLOUD_SERVER_ID = os.getenv('SELLERCLOUD_SERVER_ID')  # Replace with your actual server ID
-SHIPSTATION_API_SECRET=os.getenv("SHIPSTATION_API_SECRET")
-SHIPSTATION_API_KEY=os.getenv("SHIPSTATION_API_KEY")
+SELLERCLOUD_USERNAME = os.getenv("SELLERCLOUD_USERNAME")
+SELLERCLOUD_PASSWORD = os.getenv("SELLERCLOUD_PASSWORD")
+SELLERCLOUD_COMPANY_ID = os.getenv(
+    "SELLERCLOUD_COMPANY_ID"
+)  # Replace with your actual company ID
+SELLERCLOUD_SERVER_ID = os.getenv(
+    "SELLERCLOUD_SERVER_ID"
+)  # Replace with your actual server ID
+SHIPSTATION_API_SECRET = os.getenv("SHIPSTATION_API_SECRET")
+SHIPSTATION_API_KEY = os.getenv("SHIPSTATION_API_KEY")
 # Celery Configuration
-CELERY_BROKER_URL = 'redis://:foobaredUniqnex@127.0.0.1:6379/0'
+CELERY_BROKER_URL = "redis://:foobaredUniqnex@127.0.0.1:6379/0"
 
-CELERY_ACCEPT_CONTENT = ['json']
-CELERY_TASK_SERIALIZER = 'json'
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {"class": "logging.StreamHandler"},
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "INFO",
+    },
+}
