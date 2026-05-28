@@ -98,7 +98,9 @@ def getMarketplaceList(request):
             }
         }
     ]
+    start_time = time.time()
     marketplace_list = list(Marketplace.objects.aggregate(*pipeline))
+    print("total time", time.time() - start_time)
     return marketplace_list
 
 
