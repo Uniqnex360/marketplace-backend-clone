@@ -4761,7 +4761,10 @@ def productsTrafficandConversions(request):
     data['page_views_graph'] = page_views_graph
     return data
 
+from django.views.decorators.cache import cache_page
+
 @csrf_exempt
+@cache_page(60 * 10)
 def getSKUlist(request):
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id')
@@ -4801,8 +4804,9 @@ def getSKUlist(request):
     sku_list = list(Product.objects.aggregate(*pipeline))
     return sku_list
 
+
 @csrf_exempt
-# @redis_cache(timeout=900,key_prefix='getproductIdlist')
+@cache_page(60 * 10)
 def getproductIdlist(request):
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id')
@@ -4847,6 +4851,9 @@ def getproductIdlist(request):
     asin_list = list(Product.objects.aggregate(*pipeline))
     return sanitize_data(asin_list)
 
+
+@csrf_exempt
+@cache_page(60 * 10)
 def getBrandListforfilter(request):
     start_time = time.time()
     data = dict()
@@ -4904,6 +4911,8 @@ def getBrandListforfilter(request):
     return data
 
 
+@csrf_exempt
+@cache_page(60 * 10)
 def obtainManufactureNames(request):
     marketplace_id = request.GET.get('marketplace_id')
     search_query = request.GET.get('search_query')
