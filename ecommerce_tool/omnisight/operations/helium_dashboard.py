@@ -4848,6 +4848,7 @@ def getproductIdlist(request):
     return sanitize_data(asin_list)
 
 def getBrandListforfilter(request):
+    start_time = time.time()
     data = dict()
     marketplace_id = request.GET.get('marketplace_id')
     search_query = request.GET.get('search_query')
@@ -4865,7 +4866,10 @@ def getBrandListforfilter(request):
         product_ids=[]
     if product_ids:
         try:
-            products=Product.objects.filter(id__in=product_ids)
+            # products=Product.objects.filter(id__in=product_ids)
+            products = Product.objects.filter(
+                id__in=product_ids
+            ).no_dereference().only('brand_id', 'brand_name')
             for product in products:
                 if product.brand_id:
                     brand_ids_from_products.append(product.brand_id.id)
@@ -4896,6 +4900,7 @@ def getBrandListforfilter(request):
         for brand in brand_queryset
     ]
     data['brand_list'] = brand_list
+    print("brand list or filter", time.time() - start_time)
     return data
 
 
