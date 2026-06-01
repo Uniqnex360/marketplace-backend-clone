@@ -174,281 +174,482 @@ def sanitize_data(data):
 # # Load baseline data when module loads
 # load_baseline_data()
 
+# @csrf_exempt
+# def get_metrics_by_date_range(request):
+#     json_request = JSONParser().parse(request)
+#     marketplace_id = json_request.get('marketplace_id', None)
+#     target_date_str = json_request.get('target_date')
+#     brand_id = json_request.get('brand_id', None)
+#     product_id = json_request.get('product_id', None)
+#     manufacturer_name = json_request.get('manufacturer_name', [])
+#     fulfillment_channel = json_request.get('fulfillment_channel', None)
+#     timezone_str="US/Pacific"
+#     preset=json_request.get('preset','Today')
+#     start_date_str=json_request.get("start_date",None)
+#     end_date_str=json_request.get('end_date',None)
+#     # cache_key=generate_cache_key('get_metrics_by_date_range',json_request)
+#     # print('cache_key',cache_key)
+#     # cache_obj=EndPointCache.objects(endpoint_name="get_metrics_by_date_range").first()
+#     # print(f"got the cache{cache_obj}")
+#     # if cache_obj:
+#     #     logger.info(f"Database fallback cache hit for {cache_key}")
+#     #     return cache_obj.result
+#     # print('cacheobj',cache_obj)
+#     if start_date_str and end_date_str:
+#         start_date_dt=datetime.strptime(start_date_str,"%d/%m/%Y")
+#         end_date_dt=datetime.strptime(end_date_str,"%d/%m/%Y").replace(hour=23,minute=59,second=59)
+#     else:
+#         start_date_dt,end_date_dt=get_date_range(preset,time_zone_str=timezone_str)
+#     target_date = datetime.strptime(target_date_str, "%d/%m/%Y").date()
+#     local_tz = pytz.timezone(timezone_str)
+#     current_time = datetime.now(local_tz).replace(year=target_date.year, month=target_date.month, day=target_date.day)
+#     target_date = current_time.replace(hour=0, minute=0, second=0, microsecond=0)
+#     previous_date = target_date - timedelta(days=1)
+#     eight_days_ago = target_date - timedelta(days=8)
+#     date_filters = {
+#         "targeted": {
+#             "start": start_date_dt,
+#             "end": end_date_dt
+#         },
+#         "previous": {
+#             "start": start_date_dt-timedelta(days=1),
+#             "end": end_date_dt-timedelta(days=1)
+#         }
+#     }
+#     if start_date_str and end_date_str:
+#         graph_days_filter = {}
+#         current_day = start_date_dt
+#         while current_day <= end_date_dt:
+#             day_key = current_day.strftime("%B %d, %Y").lower()
+#             graph_days_filter[day_key] = {
+#             "start": datetime(current_day.year, current_day.month, current_day.day),
+#             "end": datetime(current_day.year, current_day.month, current_day.day, 23, 59, 59)
+#             }
+#             current_day += timedelta(days=1)
+#     else:
+#         eight_days_ago = target_date - timedelta(days=8)
+#         graph_days_filter = {}
+#         for i in range(1, 9):
+#             day = eight_days_ago + timedelta(days=i)
+#             day_key = day.strftime("%B %d, %Y").lower()
+#             graph_days_filter[day_key] = {
+#             "start": datetime(day.year, day.month, day.day),
+#             "end": datetime(day.year, day.month, day.day, 23, 59, 59)
+#         }
+#     metrics = {}
+#     graph_data = {}
+#     def process_date_range(key, date_range, results):
+#         gross_revenue_with_tax = 0
+#         result = grossRevenue(date_range["start"], date_range["end"], marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
+#         if result != []:
+#             for ins in result:
+#                 original_order_total = ins.get('original_order_total', 0.0) 
+#                 gross_revenue_with_tax += original_order_total
+#         results[key] = {
+#             "gross_revenue_with_tax":round(gross_revenue_with_tax,2)
+#         }
+#     results = {}
+#     with ThreadPoolExecutor(max_workers=min(len(graph_days_filter), 4)) as executor:
+#         futures = {executor.submit(process_date_range, key, date_range, results): key 
+#                   for key, date_range in graph_days_filter.items()}
+#         for future in futures:
+#             future.result()  
+#     graph_data = {key: results[key] for key in graph_days_filter.keys()}
+#     metrics["graph_data"] = graph_data
+#     all_order_item_ids = set()
+#     all_raw_results = {}
+#     for key, date_range in date_filters.items():
+#         raw_result = grossRevenue(date_range["start"], date_range["end"], marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
+#         result=[
+#             r for r in raw_result
+#             if r.get('order_status') not in ['Cancelled','Canceled'] and r.get('order_total')>0
+#         ]
+#         all_raw_results[key] = result
+#         unique_order_ids=set()
+#         for ins in result:
+#             all_order_item_ids.update(ins['order_items'])
+#     bulk_pipeline = [
+#         {
+#             "$match": {
+#                 "_id": {"$in": list(all_order_item_ids)}
+#             }
+#         },
+#         {
+#             "$lookup": {
+#                 "from": "product",
+#                 "localField": "ProductDetails.product_id",
+#                 "foreignField": "_id",
+#                 "as": "product_ins"
+#             }
+#         },
+#         {
+#         "$unwind": {
+#             "path": "$product_ins",
+#             "preserveNullAndEmptyArrays": True
+#         }
+#         },
+#         {
+#             "$project": {
+#                 "_id": 1,
+#                 "price": {"$ifNull": ["$Pricing.ItemPrice.Amount", 0]},
+#                 "promotion_discount": {"$ifNull": ["$Pricing.PromotionDiscount.Amount", 0]},
+#                 "ship_promotion_discount": {"$ifNull": ["$Pricing.ShipPromotionDiscount.Amount", 0]},
+#                 "tax_price": {"$ifNull": ["$Pricing.ItemTax.Amount", 0]},
+#                 "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
+#                 "referral_fee": {"$round":[{"$ifNull": ["$product_ins.referral_fee", 0]},2]},
+#                 "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
+#                 "product_cost": {"$round":[{"$ifNull": ["$product_ins.product_cost", 0]},2]},
+#                 "QuantityOrdered": {"$ifNull": ["$ProductDetails.QuantityOrdered", 1]},
+#                 "vendor_discount": {"$ifNull": ["$product_ins.vendor_discount", 0]},
+#             }
+#         }
+#     ]
+#     order_items_lookup = {}
+#     bulk_results = list(OrderItems.objects.aggregate(*bulk_pipeline))
+#     for item in bulk_results:
+#         order_items_lookup[item['_id']] = item
+#     for key, date_range in date_filters.items():
+#         result=all_raw_results[key]
+#         metrics[key]=EcommerceCalculator.calculate_order_metrics(result,order_items_lookup,include_breakdown=True)
+#         # gross_revenue = 0
+#         # gross_revenue_with_tax = 0  
+#         # total_cogs = 0
+#         # refund = 0
+#         # margin = 0
+#         # net_profit = 0
+#         # total_units = 0
+#         # total_orders = 0
+#         # tax_price = 0
+#         # promotion_discount=0
+#         # ship_promotion_discount=0
+#         # temp_other_price = 0
+#         # vendor_funding = 0
+#         # channel_fee = 0
+#         # shipping_price=0
+#         # vendor_discount=0
+#         # result = all_raw_results[key]
+#         # refund_ins = refundOrder(date_range["start"], date_range["end"], marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
+#         # if refund_ins != []:
+#         #     for ins in refund_ins:
+#         #         refund += len(ins['order_items'])
+#         # for r in result:
+#         #     po_id = r.get('purchase_order_id')
+#         #     if po_id:
+#         #         unique_order_ids.add(po_id)
+#         #     # fulfillment=(r.get('fulfillment_channel')or '').strip().upper()
+#         #     # if fulfillment in ['MFN',"AFN"]:
+#         #     #     order_key=r.get('merchant_order_id')
+#         #     # else:
+#         #     #     order_key=r.get('seller_order_id')
+#         #     # if not order_key:
+#         #     #     order_key=str(r.get("_id"))
+#         #     total_orders = len(unique_order_ids)
+#         # if result != []:    
+#         #     for ins in result:
+#         #         shipping_price += ins.get('shipping_price', 0) or 0
+#         #         gross_revenue_with_tax += ins.get('original_order_total', ins['order_total'])
+#         #         for j in ins['order_items']:
+#         #             item_result = order_items_lookup.get(j)
+#         #             if item_result:
+#         #                 tax_price += item_result['tax_price']
+#         #                 temp_other_price += item_result['price']
+#         #                 quantity=int(item_result.get('QuantityOrdered',1)or 1)
+#         #                 channel_fee += float(item_result.get("referral_fee", 0) or 0)*quantity
+#         #                 product_cost = float(item_result.get('product_cost', 0) or 0)
+#         #                 vendor_discount += float(item_result.get("vendor_discount", 0) or 0)
+#         #                 total_cogs+=product_cost*quantity
+#         #                 vendor_funding += item_result['vendor_funding']*quantity
+#         #                 promotion_discount+=item_result['promotion_discount']
+#         #                 ship_promotion_discount+=item_result['ship_promotion_discount']
+#         #                 total_units+=quantity
+#         #         merchant_shipment_cost = ins.get('merchant_shipment_cost', None)
+#         #         if merchant_shipment_cost is None:
+#         #             fulfillment_channel=ins.get('fulfillment_channel',"")
+#         #             if fulfillment_channel=='AFN':
+#         #                 merchant_shipment_cost=ins.get('shipping_price',0)
+#         #             elif fulfillment_channel=='SellerFulfilled':
+#         #                 merchant_shipment_cost = ins.get('merchant_shipment_cost', None)
+#         #                 # customer_email=ins.get('customer_email_id',"")
+#         #                 # order_date=ins.get('order_date',None)
+#         #                 # po_id=ins.get('purchase_order_id',"")
+#         #                 # shipping_info=get_orders_by_customer_and_date(
+#         #                 #             customer_email=customer_email,
+#         #                 #             order_date_utc_iso=order_date,
+#         #                 #             purchase_order_id=po_id,
+#         #                 #             local_tz='US/Pacific'
+#         #                 #     )
+#         #                 # if shipping_info:
+#         #                 #     merchant_shipment_cost=float(shipping_info[-1].get('shipmentCost',0) or 0)
+#         #                 #     order_obj=Order.objects(merchant_order_id=po_id).first()
+#         #                 #     if order_obj:
+#         #                 #         order_obj.update(set__merchant_shipment_cost=merchant_shipment_cost)
+#         #             elif fulfillment_channel=="MFN":  
+#         #                 merchant_shipment_cost = ins.get('merchant_shipment_cost', None)                                                 
+#         #                     # order_number=ins.get('merchant_order_id')
+#         #                     # order_details=get_full_order_and_shipping_details(order_number)
+#         #                     # if order_details and order_details.get('shipments'):
+#         #                     #     merchant_shipment_cost = float(order_details['shipments'][-1].get('shipmentCost', 0) or 0)
+#         #                     #     logger.info(f"Order: {order_number}, Fulfillment: {fulfillment_channel}, Shipment Cost: {merchant_shipment_cost}")
+#         #                     #     order_obj=Order.objects(merchant_order_id=order_number).first()
+#         #                     #     if order_obj:
+#         #                     #         order_obj.merchant_shipment_cost=merchant_shipment_cost
+#         #                     #         order_obj.save()
+#         #             else:
+#         #                 merchant_shipment_cost = float(ins.get('merchant_shipment_cost', 0) or 0)
+#         #         total_cogs+=merchant_shipment_cost
+#         #     net_profit = (temp_other_price + shipping_price + vendor_funding+promotion_discount - (channel_fee + total_cogs + vendor_discount+ship_promotion_discount))
+#         #     margin = (net_profit / gross_revenue_with_tax) * 100 if gross_revenue_with_tax != 0 else 0
+#         # metrics[key] = {
+#         #     "gross_revenue_with_tax":round(gross_revenue_with_tax,2),
+#         #     "total_tax":round(tax_price,2),
+#         #     "total_cogs": round(total_cogs, 2),
+#         #     "refund": round(refund, 2),
+#         #     "margin": round(margin, 2),
+#         #     "net_profit": round(net_profit, 2),
+#         #     "total_orders": round(total_orders, 2),
+#         #     "total_units": round(total_units, 2)
+#         # }
+#     difference = {
+#         "gross_revenue_with_tax": round(metrics["targeted"]["gross_revenue_with_tax"] - metrics["previous"]["gross_revenue_with_tax"], 2),
+#         "total_cogs": round(metrics["targeted"]["total_cogs"] - metrics["previous"]["total_cogs"], 2),
+#         "refund": round(metrics["targeted"]["refund"] - metrics["previous"]["refund"], 2),
+#         "margin": round(metrics["targeted"]["margin"] - metrics["previous"]["margin"], 2),
+#         "total_tax":round(metrics['targeted']['total_tax']-metrics['previous']['total_tax'],2),
+#         "net_profit": round(metrics["targeted"]["net_profit"] - metrics["previous"]["net_profit"], 2),
+#         "total_orders": round(metrics["targeted"]["total_orders"] - metrics["previous"]["total_orders"], 2),
+#         "total_units": round(metrics["targeted"]["total_units"] - metrics["previous"]["total_units"], 2),
+#     }
+#     name = "Today Snapshot"
+#     item_pipeline = [
+#         {"$match": {"name": name}}
+#     ]
+#     item_result = list(chooseMatrix.objects.aggregate(*item_pipeline))
+#     if item_result:
+#         item_result = item_result[0]
+#         if item_result['select_all']:
+#             pass
+#         if item_result['gross_revenue'] == False:
+#             del metrics['targeted']["gross_revenue"]
+#             del metrics['previous']["gross_revenue"]
+#         if item_result['units_sold'] == False:
+#             del metrics['targeted']["total_units"]
+#             del metrics['previous']["total_units"]
+#         if item_result['total_cogs'] == False:
+#             del metrics['targeted']["total_cogs"]
+#             del metrics['previous']["total_cogs"]
+#         if item_result['orders'] == False:
+#             del metrics['targeted']["total_orders"]
+#             del metrics['previous']["total_orders"]
+#         if item_result['refund_quantity'] == False:
+#             del metrics['targeted']["refund"]
+#             del metrics['previous']["refund"]
+#         if item_result['profit_margin'] == False:
+#             del metrics['targeted']["margin"]
+#             del metrics['previous']["margin"]
+#     metrics["difference"] = difference
+#     metrics = sanitize_data(metrics)
+#     return metrics
+
+import time
+from datetime import datetime, timedelta
+import pytz
+from concurrent.futures import ThreadPoolExecutor
+
+def perf_log(label, start_time):
+    print(f"[PERF] {label}: {round((time.time() - start_time)*1000, 2)} ms")
+
 @csrf_exempt
 def get_metrics_by_date_range(request):
+
+    t0 = time.time()
     json_request = JSONParser().parse(request)
-    marketplace_id = json_request.get('marketplace_id', None)
+    perf_log("parse_request", t0)
+
+    marketplace_id = json_request.get('marketplace_id')
     target_date_str = json_request.get('target_date')
-    brand_id = json_request.get('brand_id', None)
-    product_id = json_request.get('product_id', None)
+    brand_id = json_request.get('brand_id')
+    product_id = json_request.get('product_id')
     manufacturer_name = json_request.get('manufacturer_name', [])
-    fulfillment_channel = json_request.get('fulfillment_channel', None)
-    timezone_str="US/Pacific"
-    preset=json_request.get('preset','Today')
-    start_date_str=json_request.get("start_date",None)
-    end_date_str=json_request.get('end_date',None)
-    # cache_key=generate_cache_key('get_metrics_by_date_range',json_request)
-    # print('cache_key',cache_key)
-    # cache_obj=EndPointCache.objects(endpoint_name="get_metrics_by_date_range").first()
-    # print(f"got the cache{cache_obj}")
-    # if cache_obj:
-    #     logger.info(f"Database fallback cache hit for {cache_key}")
-    #     return cache_obj.result
-    # print('cacheobj',cache_obj)
+    fulfillment_channel = json_request.get('fulfillment_channel')
+    timezone_str = "US/Pacific"
+    preset = json_request.get('preset', 'Today')
+    start_date_str = json_request.get("start_date")
+    end_date_str = json_request.get('end_date')
+
+    t1 = time.time()
+
     if start_date_str and end_date_str:
-        start_date_dt=datetime.strptime(start_date_str,"%d/%m/%Y")
-        end_date_dt=datetime.strptime(end_date_str,"%d/%m/%Y").replace(hour=23,minute=59,second=59)
+        start_date_dt = datetime.strptime(start_date_str, "%d/%m/%Y")
+        end_date_dt = datetime.strptime(end_date_str, "%d/%m/%Y").replace(hour=23, minute=59, second=59)
     else:
-        start_date_dt,end_date_dt=get_date_range(preset,time_zone_str=timezone_str)
-    target_date = datetime.strptime(target_date_str, "%d/%m/%Y").date()
+        start_date_dt, end_date_dt = get_date_range(preset, time_zone_str=timezone_str)
+
+    perf_log("date_range_calc", t1)
+
+    # FIX: avoid repeated parsing
     local_tz = pytz.timezone(timezone_str)
-    current_time = datetime.now(local_tz).replace(year=target_date.year, month=target_date.month, day=target_date.day)
-    target_date = current_time.replace(hour=0, minute=0, second=0, microsecond=0)
-    previous_date = target_date - timedelta(days=1)
-    eight_days_ago = target_date - timedelta(days=8)
+    target_date = datetime.strptime(target_date_str, "%d/%m/%Y").date()
+    target_date = datetime.now(local_tz).replace(
+        year=target_date.year,
+        month=target_date.month,
+        day=target_date.day,
+        hour=0, minute=0, second=0, microsecond=0
+    )
+
     date_filters = {
         "targeted": {
             "start": start_date_dt,
             "end": end_date_dt
         },
         "previous": {
-            "start": start_date_dt-timedelta(days=1),
-            "end": end_date_dt-timedelta(days=1)
+            "start": start_date_dt - timedelta(days=1),
+            "end": end_date_dt - timedelta(days=1)
         }
     }
-    if start_date_str and end_date_str:
-        graph_days_filter = {}
-        current_day = start_date_dt
-        while current_day <= end_date_dt:
-            day_key = current_day.strftime("%B %d, %Y").lower()
-            graph_days_filter[day_key] = {
-            "start": datetime(current_day.year, current_day.month, current_day.day),
-            "end": datetime(current_day.year, current_day.month, current_day.day, 23, 59, 59)
-            }
-            current_day += timedelta(days=1)
-    else:
-        eight_days_ago = target_date - timedelta(days=8)
-        graph_days_filter = {}
-        for i in range(1, 9):
-            day = eight_days_ago + timedelta(days=i)
-            day_key = day.strftime("%B %d, %Y").lower()
-            graph_days_filter[day_key] = {
-            "start": datetime(day.year, day.month, day.day),
-            "end": datetime(day.year, day.month, day.day, 23, 59, 59)
+
+    t2 = time.time()
+
+    # ---------------- GRAPH OPTIMIZATION ----------------
+    graph_days_filter = {}
+    current_day = start_date_dt
+
+    while current_day <= end_date_dt:
+        key = current_day.strftime("%B %d, %Y").lower()
+        graph_days_filter[key] = {
+            "start": current_day,
+            "end": current_day.replace(hour=23, minute=59, second=59)
         }
-    metrics = {}
-    graph_data = {}
-    def process_date_range(key, date_range, results):
-        gross_revenue_with_tax = 0
-        result = grossRevenue(date_range["start"], date_range["end"], marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
-        if result != []:
-            for ins in result:
-                original_order_total = ins.get('original_order_total', 0.0) 
-                gross_revenue_with_tax += original_order_total
-        results[key] = {
-            "gross_revenue_with_tax":round(gross_revenue_with_tax,2)
-        }
-    results = {}
-    with ThreadPoolExecutor(max_workers=min(len(graph_days_filter), 4)) as executor:
-        futures = {executor.submit(process_date_range, key, date_range, results): key 
-                  for key, date_range in graph_days_filter.items()}
-        for future in futures:
-            future.result()  
-    graph_data = {key: results[key] for key in graph_days_filter.keys()}
-    metrics["graph_data"] = graph_data
+        current_day += timedelta(days=1)
+
+    perf_log("graph_filter_build", t2)
+
+    # ---------------- PARALLEL GRAPH ----------------
+    t3 = time.time()
+
+    graph_results = {}
+
+    def compute_graph(key, date_range):
+        res = grossRevenue(
+            date_range["start"],
+            date_range["end"],
+            marketplace_id,
+            brand_id,
+            product_id,
+            manufacturer_name,
+            fulfillment_channel,
+            timezone_str
+        )
+        total = sum(x.get("original_order_total", 0) for x in res)
+        graph_results[key] = {"gross_revenue_with_tax": round(total, 2)}
+
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        list(ex.map(lambda kv: compute_graph(*kv), graph_days_filter.items()))
+
+    perf_log("graph_queries", t3)
+
+    metrics = {"graph_data": graph_results}
+
+    # ---------------- CACHE GROSSREVENUE RESULTS ----------------
+    t4 = time.time()
+
+    gross_cache = {}
+
+    def get_gross_cached(start, end):
+        key = (start, end)
+        if key not in gross_cache:
+            gross_cache[key] = grossRevenue(
+                start, end,
+                marketplace_id,
+                brand_id,
+                product_id,
+                manufacturer_name,
+                fulfillment_channel,
+                timezone_str
+            )
+        return gross_cache[key]
+
     all_order_item_ids = set()
     all_raw_results = {}
-    for key, date_range in date_filters.items():
-        raw_result = grossRevenue(date_range["start"], date_range["end"], marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
-        result=[
-            r for r in raw_result
-            if r.get('order_status') not in ['Cancelled','Canceled'] and r.get('order_total')>0
+
+    for k, dr in date_filters.items():
+        raw = get_gross_cached(dr["start"], dr["end"])
+
+        filtered = [
+            r for r in raw
+            if r.get('order_status') not in ['Cancelled', 'Canceled']
+            and r.get('order_total', 0) > 0
         ]
-        all_raw_results[key] = result
-        unique_order_ids=set()
-        for ins in result:
-            all_order_item_ids.update(ins['order_items'])
+
+        all_raw_results[k] = filtered
+
+        for r in filtered:
+            all_order_item_ids.update(r.get("order_items", []))
+
+    perf_log("grossRevenue_cached", t4)
+
+    # ---------------- BULK LOOKUP ----------------
+    t5 = time.time()
+
     bulk_pipeline = [
-        {
-            "$match": {
-                "_id": {"$in": list(all_order_item_ids)}
-            }
-        },
-        {
-            "$lookup": {
-                "from": "product",
-                "localField": "ProductDetails.product_id",
-                "foreignField": "_id",
-                "as": "product_ins"
-            }
-        },
-        {
-        "$unwind": {
-            "path": "$product_ins",
-            "preserveNullAndEmptyArrays": True
-        }
-        },
-        {
-            "$project": {
-                "_id": 1,
-                "price": {"$ifNull": ["$Pricing.ItemPrice.Amount", 0]},
-                "promotion_discount": {"$ifNull": ["$Pricing.PromotionDiscount.Amount", 0]},
-                "ship_promotion_discount": {"$ifNull": ["$Pricing.ShipPromotionDiscount.Amount", 0]},
-                "tax_price": {"$ifNull": ["$Pricing.ItemTax.Amount", 0]},
-                "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
-                "referral_fee": {"$round":[{"$ifNull": ["$product_ins.referral_fee", 0]},2]},
-                "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
-                "product_cost": {"$round":[{"$ifNull": ["$product_ins.product_cost", 0]},2]},
-                "QuantityOrdered": {"$ifNull": ["$ProductDetails.QuantityOrdered", 1]},
-                "vendor_discount": {"$ifNull": ["$product_ins.vendor_discount", 0]},
-            }
-        }
+        {"$match": {"_id": {"$in": list(all_order_item_ids)}}},
+        {"$lookup": {
+            "from": "product",
+            "localField": "ProductDetails.product_id",
+            "foreignField": "_id",
+            "as": "product_ins"
+        }},
+        {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
+        {"$project": {
+            "price": {"$ifNull": ["$Pricing.ItemPrice.Amount", 0]},
+            "promotion_discount": {"$ifNull": ["$Pricing.PromotionDiscount.Amount", 0]},
+            "ship_promotion_discount": {"$ifNull": ["$Pricing.ShipPromotionDiscount.Amount", 0]},
+            "tax_price": {"$ifNull": ["$Pricing.ItemTax.Amount", 0]},
+            "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
+            "referral_fee": {"$round": [{"$ifNull": ["$product_ins.referral_fee", 0]}, 2]},
+            "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
+            "product_cost": {"$round": [{"$ifNull": ["$product_ins.product_cost", 0]}, 2]},
+            "QuantityOrdered": {"$ifNull": ["$ProductDetails.QuantityOrdered", 1]},
+            "vendor_discount": {"$ifNull": ["$product_ins.vendor_discount", 0]},
+        }}
     ]
-    order_items_lookup = {}
-    bulk_results = list(OrderItems.objects.aggregate(*bulk_pipeline))
-    for item in bulk_results:
-        order_items_lookup[item['_id']] = item
-    for key, date_range in date_filters.items():
-        result=all_raw_results[key]
-        metrics[key]=EcommerceCalculator.calculate_order_metrics(result,order_items_lookup,include_breakdown=True)
-        # gross_revenue = 0
-        # gross_revenue_with_tax = 0  
-        # total_cogs = 0
-        # refund = 0
-        # margin = 0
-        # net_profit = 0
-        # total_units = 0
-        # total_orders = 0
-        # tax_price = 0
-        # promotion_discount=0
-        # ship_promotion_discount=0
-        # temp_other_price = 0
-        # vendor_funding = 0
-        # channel_fee = 0
-        # shipping_price=0
-        # vendor_discount=0
-        # result = all_raw_results[key]
-        # refund_ins = refundOrder(date_range["start"], date_range["end"], marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
-        # if refund_ins != []:
-        #     for ins in refund_ins:
-        #         refund += len(ins['order_items'])
-        # for r in result:
-        #     po_id = r.get('purchase_order_id')
-        #     if po_id:
-        #         unique_order_ids.add(po_id)
-        #     # fulfillment=(r.get('fulfillment_channel')or '').strip().upper()
-        #     # if fulfillment in ['MFN',"AFN"]:
-        #     #     order_key=r.get('merchant_order_id')
-        #     # else:
-        #     #     order_key=r.get('seller_order_id')
-        #     # if not order_key:
-        #     #     order_key=str(r.get("_id"))
-        #     total_orders = len(unique_order_ids)
-        # if result != []:    
-        #     for ins in result:
-        #         shipping_price += ins.get('shipping_price', 0) or 0
-        #         gross_revenue_with_tax += ins.get('original_order_total', ins['order_total'])
-        #         for j in ins['order_items']:
-        #             item_result = order_items_lookup.get(j)
-        #             if item_result:
-        #                 tax_price += item_result['tax_price']
-        #                 temp_other_price += item_result['price']
-        #                 quantity=int(item_result.get('QuantityOrdered',1)or 1)
-        #                 channel_fee += float(item_result.get("referral_fee", 0) or 0)*quantity
-        #                 product_cost = float(item_result.get('product_cost', 0) or 0)
-        #                 vendor_discount += float(item_result.get("vendor_discount", 0) or 0)
-        #                 total_cogs+=product_cost*quantity
-        #                 vendor_funding += item_result['vendor_funding']*quantity
-        #                 promotion_discount+=item_result['promotion_discount']
-        #                 ship_promotion_discount+=item_result['ship_promotion_discount']
-        #                 total_units+=quantity
-        #         merchant_shipment_cost = ins.get('merchant_shipment_cost', None)
-        #         if merchant_shipment_cost is None:
-        #             fulfillment_channel=ins.get('fulfillment_channel',"")
-        #             if fulfillment_channel=='AFN':
-        #                 merchant_shipment_cost=ins.get('shipping_price',0)
-        #             elif fulfillment_channel=='SellerFulfilled':
-        #                 merchant_shipment_cost = ins.get('merchant_shipment_cost', None)
-        #                 # customer_email=ins.get('customer_email_id',"")
-        #                 # order_date=ins.get('order_date',None)
-        #                 # po_id=ins.get('purchase_order_id',"")
-        #                 # shipping_info=get_orders_by_customer_and_date(
-        #                 #             customer_email=customer_email,
-        #                 #             order_date_utc_iso=order_date,
-        #                 #             purchase_order_id=po_id,
-        #                 #             local_tz='US/Pacific'
-        #                 #     )
-        #                 # if shipping_info:
-        #                 #     merchant_shipment_cost=float(shipping_info[-1].get('shipmentCost',0) or 0)
-        #                 #     order_obj=Order.objects(merchant_order_id=po_id).first()
-        #                 #     if order_obj:
-        #                 #         order_obj.update(set__merchant_shipment_cost=merchant_shipment_cost)
-        #             elif fulfillment_channel=="MFN":  
-        #                 merchant_shipment_cost = ins.get('merchant_shipment_cost', None)                                                 
-        #                     # order_number=ins.get('merchant_order_id')
-        #                     # order_details=get_full_order_and_shipping_details(order_number)
-        #                     # if order_details and order_details.get('shipments'):
-        #                     #     merchant_shipment_cost = float(order_details['shipments'][-1].get('shipmentCost', 0) or 0)
-        #                     #     logger.info(f"Order: {order_number}, Fulfillment: {fulfillment_channel}, Shipment Cost: {merchant_shipment_cost}")
-        #                     #     order_obj=Order.objects(merchant_order_id=order_number).first()
-        #                     #     if order_obj:
-        #                     #         order_obj.merchant_shipment_cost=merchant_shipment_cost
-        #                     #         order_obj.save()
-        #             else:
-        #                 merchant_shipment_cost = float(ins.get('merchant_shipment_cost', 0) or 0)
-        #         total_cogs+=merchant_shipment_cost
-        #     net_profit = (temp_other_price + shipping_price + vendor_funding+promotion_discount - (channel_fee + total_cogs + vendor_discount+ship_promotion_discount))
-        #     margin = (net_profit / gross_revenue_with_tax) * 100 if gross_revenue_with_tax != 0 else 0
-        # metrics[key] = {
-        #     "gross_revenue_with_tax":round(gross_revenue_with_tax,2),
-        #     "total_tax":round(tax_price,2),
-        #     "total_cogs": round(total_cogs, 2),
-        #     "refund": round(refund, 2),
-        #     "margin": round(margin, 2),
-        #     "net_profit": round(net_profit, 2),
-        #     "total_orders": round(total_orders, 2),
-        #     "total_units": round(total_units, 2)
-        # }
+
+    bulk_results = OrderItems.objects.aggregate(*bulk_pipeline)
+    item_map = {x["_id"]: x for x in bulk_results}
+
+    perf_log("bulk_lookup", t5)
+
+    # ---------------- FINAL CALC ----------------
+    t6 = time.time()
+
+    for k, dr in date_filters.items():
+        metrics[k] = EcommerceCalculator.calculate_order_metrics(
+            all_raw_results[k],
+            item_map,
+            include_breakdown=True
+        )
+
+    perf_log("final_metrics_calc", t6)
+
+    # ---------------- DIFFERENCE ----------------
+    t7 = time.time()
+
     difference = {
         "gross_revenue_with_tax": round(metrics["targeted"]["gross_revenue_with_tax"] - metrics["previous"]["gross_revenue_with_tax"], 2),
         "total_cogs": round(metrics["targeted"]["total_cogs"] - metrics["previous"]["total_cogs"], 2),
         "refund": round(metrics["targeted"]["refund"] - metrics["previous"]["refund"], 2),
         "margin": round(metrics["targeted"]["margin"] - metrics["previous"]["margin"], 2),
-        "total_tax":round(metrics['targeted']['total_tax']-metrics['previous']['total_tax'],2),
+        "total_tax": round(metrics['targeted']['total_tax'] - metrics['previous']['total_tax'], 2),
         "net_profit": round(metrics["targeted"]["net_profit"] - metrics["previous"]["net_profit"], 2),
         "total_orders": round(metrics["targeted"]["total_orders"] - metrics["previous"]["total_orders"], 2),
         "total_units": round(metrics["targeted"]["total_units"] - metrics["previous"]["total_units"], 2),
     }
-    name = "Today Snapshot"
-    item_pipeline = [
-        {"$match": {"name": name}}
-    ]
-    item_result = list(chooseMatrix.objects.aggregate(*item_pipeline))
-    if item_result:
-        item_result = item_result[0]
-        if item_result['select_all']:
-            pass
-        if item_result['gross_revenue'] == False:
-            del metrics['targeted']["gross_revenue"]
-            del metrics['previous']["gross_revenue"]
-        if item_result['units_sold'] == False:
-            del metrics['targeted']["total_units"]
-            del metrics['previous']["total_units"]
-        if item_result['total_cogs'] == False:
-            del metrics['targeted']["total_cogs"]
-            del metrics['previous']["total_cogs"]
-        if item_result['orders'] == False:
-            del metrics['targeted']["total_orders"]
-            del metrics['previous']["total_orders"]
-        if item_result['refund_quantity'] == False:
-            del metrics['targeted']["refund"]
-            del metrics['previous']["refund"]
-        if item_result['profit_margin'] == False:
-            del metrics['targeted']["margin"]
-            del metrics['previous']["margin"]
+
     metrics["difference"] = difference
-    metrics = sanitize_data(metrics)
-    return metrics
+
+    perf_log("difference_calc", t7)
+
+    return sanitize_data(metrics)
+
 
 @csrf_exempt
 def LatestOrdersTodayAPIView(request):
@@ -2040,238 +2241,443 @@ def getPeriodWiseDataCustom(request):
     }
     return JsonResponse(response_data, safe=False)
 
+# @csrf_exempt
+# def allMarketplaceData(request):
+#     json_request = JSONParser().parse(request)
+#     marketplace_id = json_request.get('marketplace_id', None)
+#     brand_id = json_request.get('brand_id', [])
+#     product_id = json_request.get('product_id', [])
+#     manufacturer_name = json_request.get('manufacturer_name', [])
+#     fulfillment_channel = json_request.get('fulfillment_channel', None)
+#     preset = json_request.get('preset')
+#     timezone_str = 'US/Pacific'
+#     start_date = json_request.get("start_date", None)
+#     end_date = json_request.get("end_date", None)
+#     if start_date:
+#         from_date, to_date = convertdateTotimezone(start_date, end_date, timezone_str)
+#     else:
+#         from_date, to_date = get_date_range(preset, timezone_str)
+#     marketplace_dict = {
+#         str(mp.id): mp.name for mp in Marketplace.objects.only("id", "name")
+#     }
+#     def fetch_item_details_bulk(item_ids):
+#         pipeline = [
+#             {"$match": {"_id": {"$in": item_ids}}},
+#             {
+#                 "$lookup": {
+#                     "from": "product",
+#                     "localField": "ProductDetails.product_id",
+#                     "foreignField": "_id",
+#                     "as": "product_ins"
+#                 }
+#             },
+#             {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
+#             {
+#                 "$project": {
+#                     "_id": 1,
+#                     "price": "$Pricing.ItemPrice.Amount",
+#                     "tax_price": "$Pricing.ItemTax.Amount",
+#                     'promotion_discount':{"$ifNull":["$Pricing.PromotionDiscount.Amount",0]},
+#                     'ship_promotion_discount':{"$ifNull":["$Pricing.ShipPromotionDiscount.Amount",0]},
+#                     "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
+#                     "sku": "$product_ins.sku",
+#                     "referral_fee": {"$round":[{"$ifNull": ["$product_ins.referral_fee", 0]},2]},
+#                     "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
+#                     "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
+#                     "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
+#                     "vendor_discount": {"$ifNull": ["$product_ins.vendor_discount", 0]},
+#                     "product_cost": {"$round":[{"$ifNull": ["$product_ins.product_cost", 0]},2]},
+#                     "w_product_cost": {"$ifNull": ["$product_ins.w_product_cost", 0]},
+#                     "QuantityOrdered": {"$ifNull": ["$ProductDetails.QuantityOrdered", 1]},
+#                 }
+#             }
+#         ]
+#         return {
+#             item["_id"]: item
+#             for item in OrderItems.objects.aggregate(*pipeline)
+#         }
+#     def process_orders(orders):
+#         all_item_ids = [item_id for order in orders for item_id in order["order_items"]]
+#         item_map = fetch_item_details_bulk(all_item_ids)
+#         grouped_orders = defaultdict(list)
+#         for order in orders:
+#             key = (order.get("marketplace_id"), order.get("currency"))
+#             grouped_orders[key].append(order)
+#         marketplace_metrics = defaultdict(lambda: {"currency_list": []})
+#         for (mp_id, currency), order_list in grouped_orders.items():
+#             gross_revenue = 0
+#             total_cogs = 0
+#             total_units = 0
+#             tax_price = 0
+#             total_product_cost = 0
+#             temp_price = 0
+#             refund=0
+#             referral_fee_total = 0
+#             referral_fee=0
+#             shipping_cost=0
+#             channel_fee=0
+#             vendor_funding = 0
+#             vendor_discount=0
+#             ship_promotion_discount=0
+#             promotion_discount=0
+#             sku_set = set()
+#             marketplace_name = marketplace_dict.get(str(mp_id), "")
+#             for order in order_list:
+#                 gross_revenue += order["original_order_total"]
+#                 shipping_cost += order.get('shipping_price', 0) or 0  
+#                 for item_id in order['order_items']:
+#                     item_data = item_map.get(item_id)
+#                     if not item_data:
+#                         continue
+#                     price=item_data.get('price',0 or 0)
+#                     if price==0 and hasattr(item_data,'charges'):
+#                         price=sum(float(charge.get('chargeAmount',0)) for charge in item_data['charges'])
+#                     temp_price+=price
+#                     quantity = int(item_data.get('QuantityOrdered', 1) or 1)
+#                     referral_fee = float(item_data.get('referral_fee', 0) or 0)
+#                     promotion_discount+=float(item_data.get('promotion_discount',0) or 0)
+#                     ship_promotion_discount+=float(item_data.get('ship_promotion_discount',0) or 0)
+#                     referral_fee_total += referral_fee*quantity
+#                     tax_price += float(item_data.get('tax_price') or 0)
+#                     product_cost = float(item_data.get('product_cost', 0) or 0)
+#                     total_cogs += product_cost * quantity
+#                     total_units+=quantity
+#                     vendor_funding += item_data['vendor_funding']*quantity
+#                     vendor_discount += float(item_data.get('vendor_discount', 0) or 0)
+#                     total_product_cost += item_data['price']
+#                     if item_data.get('sku'):
+#                         sku_set.add(item_data['sku'])
+#                 fulfillment_channel=order.get('fulfillment_channel',"")
+#                 merchant_shipment_cost=order.get('merchant_shipment_cost',0)
+#                 if merchant_shipment_cost is None:
+#                     if fulfillment_channel=="AFN":
+#                         merchant_shipment_cost=order.get('shipping_price',0)
+#                     elif fulfillment_channel=='MFN':
+#                         merchant_shipment_cost=order.get('merchant_shipment_cost',0)
+#                         # order_details=get_full_order_and_shipping_details(order_number)
+#                         # if order_details and order_details.get('shipments'):
+#                         #     merchant_shipment_cost=float(order_details['shipments'][-1].get('shipmentCost', 0) or 0)
+#                         #     order_obj = Order.objects(merchant_order_id=order_number).first()
+#                         #     if order_obj:
+#                         #         order_obj.merchant_shipment_cost=merchant_shipment_cost
+#                         #         order_obj.save()
+#                     elif fulfillment_channel=='SellerFulfilled':
+#                         merchant_shipment_cost=order.get('merchant_shipment_cost',0)
+#                         # customer_email=order.get('customer_email_id','')
+#                         # order_date=order.get('order_date',None)
+#                         # po_id=order.get('purchase_order_id','')
+#                         # shipping_info=get_orders_by_customer_and_date(
+#                         #             customer_email=customer_email,
+#                         #             order_date_utc_iso=order_date,
+#                         #             purchase_order_id=po_id,
+#                         #             local_tz="US/Pacific"
+#                         # )
+#                         # if shipping_info:
+#                         #     merchant_shipment_cost=float(shipping_info[-1].get('shipmentCost',0) or 0)
+#                         #     order_obj=Order.objects(merchant_order_id=po_id).first()
+#                         #     if order_obj:
+#                         #         order_obj.update(set__merchant_shipment_cost=merchant_shipment_cost)
+#                     else:    
+#                         merchant_shipment_cost=float(merchant_shipment_cost or 0)
+#                 total_cogs+=merchant_shipment_cost
+#             expenses = total_cogs + referral_fee_total
+#             net_profit = (temp_price+ shipping_cost+promotion_discount+ vendor_funding- (referral_fee_total + total_cogs + vendor_discount+ship_promotion_discount+refund))
+#             roi = (net_profit / expenses) * 100 if expenses > 0 else 0
+#             margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
+#             currency_data = {
+#                 "currency": currency,
+#                 "grossRevenue": round(gross_revenue, 2),
+#                 "expenses": round(expenses, 2),
+#                 "netProfit": round(net_profit, 2),
+#                 "roi": round(roi, 2),
+#                 "unitsSold": total_units,
+#                 "refunds": 0,
+#                 "skuCount": len(sku_set),
+#                 "margin": round(margin, 2),
+#                 "sessions": 0,
+#                 "pageViews": 0,
+#                 "unitSessionPercentage": 0,
+#                 "seller": "",
+#                 "tax_price": round(tax_price, 2),
+#                 "total_cogs": round(total_cogs, 2),
+#                 "product_cost": round(total_product_cost, 2),
+#                 "shipping_cost": 0
+#             }
+#             marketplace_metrics[marketplace_name]["currency_list"].append(currency_data)
+#         return [
+#             {
+#                 "image": (
+#                     "https://i.pinimg.com/originals/01/ca/da/01cada77a0a7d326d85b7969fe26a728.jpg"
+#                     if mp == "Amazon" else
+#                     "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRzjtf8dzq48TtkzeRYx2-_li3gTCkstX2juA&s"
+#                     if mp == "Walmart" else ""
+#                 ),
+#                 "marketplace": mp,
+#                 "currency_list": data["currency_list"]
+#             }
+#             for mp, data in marketplace_metrics.items()
+#         ]
+#     def calculate_metrics(orders):
+#         all_item_ids = [item_id for order in orders for item_id in order["order_items"]]
+#         item_map = fetch_item_details_bulk(all_item_ids)
+#         gross_revenue = 0
+#         total_cogs = 0
+#         net_profit = 0
+#         margin = 0
+#         total_units = 0
+#         temp_price = 0
+#         promotion_discount=0
+#         ship_promotion_discount=0
+#         sku_set = set()
+#         vendor_funding = 0
+#         referral_fee_total = 0
+#         tax_price = 0
+#         refund=0
+#         shipping_cost=0
+#         vendor_discount=0
+#         for order in orders:
+#             gross_revenue += order['original_order_total']
+#             shipping_cost+=order.get('shipping_price',0)
+#             for item_id in order['order_items']:
+#                 item_data = item_map.get(item_id)
+#                 if not item_data:
+#                     continue
+#                 temp_price += item_data['price']
+#                 promotion_discount+=float(item_data.get('promotion_discount',0)or 0)
+#                 ship_promotion_discount+=float(item_data.get('ship_promotion_discount',0)or 0)
+#                 product_cost=float(item_data.get('product_cost',0) or 0)
+#                 quantity=int(item_data.get('QuantityOrdered',1) or 1)
+#                 total_units+=quantity
+#                 referral_fee = float(item_data.get('referral_fee', 0) or 0)
+#                 referral_fee_total += referral_fee*quantity
+#                 tax_price += float(item_data.get('tax_price') or 0)
+#                 marketplace_name = order.get("marketplace_name", "Amazon")
+#                 total_cogs+=product_cost*quantity
+#                 vendor_funding += item_data['vendor_funding']*quantity
+#                 vendor_discount+=float(item_data.get('vendor_discount'))
+#                 if item_data.get('sku'):
+#                     sku_set.add(item_data['sku'])
+#             fulfillment_channel=order.get('fulfillment_channel',"")
+#             merchant_shipment_cost=order.get('merchant_shipment_cost',0)
+#             if merchant_shipment_cost is None:
+#                 if fulfillment_channel=="AFN":
+#                     merchant_shipment_cost=order.get('shipping_price',0)
+#                 elif fulfillment_channel=='MFN':
+#                     merchant_shipment_cost=order.get('merchant_shipment_cost',0)
+#                 elif fulfillment_channel=="SellerFulfilled":
+#                     merchant_shipment_cost=order.get('merchant_shipment_cost',0)
+#                 else:
+#                     merchant_shipment_cost=merchant_shipment_cost or 0
+#             total_cogs+=merchant_shipment_cost
+#         expenses = total_cogs + referral_fee_total
+#         net_profit = (temp_price + shipping_cost +promotion_discount+ vendor_funding - (referral_fee_total + total_cogs + vendor_discount+ship_promotion_discount+refund))
+#         margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
+#         roi = (net_profit / expenses) * 100 if expenses > 0 else 0
+#         return {
+#             "grossRevenue": round(gross_revenue, 2),
+#             "expenses": round(expenses, 2),
+#             "netProfit": round(net_profit, 2),
+#             "roi": round(roi, 2),
+#             "unitsSold": total_units,
+#             "refunds": 0,
+#             "skuCount": len(sku_set),
+#             "sessions": 0,
+#             "pageViews": 0,
+#             "unitSessionPercentage": 0,
+#             "margin": round(margin, 2),
+#             "seller": "",
+#             "tax_price": round(tax_price, 2),
+#             "total_cogs": round(total_cogs, 2),
+#             "product_cost": round(gross_revenue, 2),
+#             "shipping_cost": 0
+#     }
+#     def create_period_response(cur_from, cur_to, prev_from, prev_to):
+#         current_orders = grossRevenue(cur_from, cur_to, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
+#         previous_orders = grossRevenue(prev_from, prev_to, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
+#         current = calculate_metrics(current_orders)
+#         previous = calculate_metrics(previous_orders)
+#         def with_delta(metric):
+#             return {
+#                 "current": current[metric],
+#                 "previous": previous[metric],
+#                 "delta": round(current[metric] - previous[metric], 2)
+#             }
+#         return {
+#             "all_marketplace": {
+#                 metric: with_delta(metric) for metric in [
+#                     "grossRevenue", "netProfit", "expenses", "unitsSold", "refunds",
+#                     "skuCount", "sessions", "pageViews", "unitSessionPercentage", "margin", "roi"
+#                 ]
+#             },
+#             "marketplace_list": process_orders(current_orders)
+#         }
+#     custom_duration = to_date - from_date
+#     prev_from_date = from_date - custom_duration
+#     prev_to_date = to_date - custom_duration
+#     response_data = {
+#         "custom": create_period_response(from_date, to_date, prev_from_date, prev_to_date),
+#         "from_date": from_date,
+#         "to_date": to_date
+#     }
+#     return JsonResponse(response_data, safe=False)
+
+import time
+from collections import defaultdict
+
+
+
+def perf_log(label, start):
+    print(f"[PERF] {label}: {(time.time() - start) * 1000:.2f} ms")
+
+
+import time
+from collections import defaultdict
+
+def perf_log(label, start):
+    print(f"[PERF] {label}: {(time.time() - start) * 1000:.2f} ms")
+
+
 @csrf_exempt
 def allMarketplaceData(request):
+    overall_start = time.time()
     json_request = JSONParser().parse(request)
+
     marketplace_id = json_request.get('marketplace_id', None)
     brand_id = json_request.get('brand_id', [])
     product_id = json_request.get('product_id', [])
     manufacturer_name = json_request.get('manufacturer_name', [])
     fulfillment_channel = json_request.get('fulfillment_channel', None)
     preset = json_request.get('preset')
+
     timezone_str = 'US/Pacific'
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
+
+    # -------------------------
+    # DATE RANGE
+    # -------------------------
+    t = time.time()
     if start_date:
         from_date, to_date = convertdateTotimezone(start_date, end_date, timezone_str)
     else:
         from_date, to_date = get_date_range(preset, timezone_str)
-    marketplace_dict = {
-        str(mp.id): mp.name for mp in Marketplace.objects.only("id", "name")
+    perf_log("date_range_calculation", t)
+
+    # -------------------------
+    # MARKETPLACE MAP (OPTIMIZED: dict instead of list usage later)
+    # -------------------------
+    t = time.time()
+    marketplace_map = {
+        str(mp["_id"]): mp["name"]
+        for mp in Marketplace.objects.aggregate(
+            {"$project": {"_id": 1, "name": 1}}
+        )
     }
+    perf_log("marketplace_dict_load", t)
+
+    # -------------------------
+    # BULK ITEM FETCH (OPTIMIZED RAW COLLECTION)
+    # -------------------------
     def fetch_item_details_bulk(item_ids):
-        pipeline = [
-            {"$match": {"_id": {"$in": item_ids}}},
+        t0 = time.time()
+
+        item_ids = list(set(item_ids))
+
+        if not item_ids:
+            return {}
+
+        cursor = OrderItems._get_collection().find(
+            {"_id": {"$in": item_ids}},
             {
-                "$lookup": {
-                    "from": "product",
-                    "localField": "ProductDetails.product_id",
-                    "foreignField": "_id",
-                    "as": "product_ins"
-                }
-            },
-            {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
-            {
-                "$project": {
-                    "_id": 1,
-                    "price": "$Pricing.ItemPrice.Amount",
-                    "tax_price": "$Pricing.ItemTax.Amount",
-                    'promotion_discount':{"$ifNull":["$Pricing.PromotionDiscount.Amount",0]},
-                    'ship_promotion_discount':{"$ifNull":["$Pricing.ShipPromotionDiscount.Amount",0]},
-                    "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
-                    "sku": "$product_ins.sku",
-                    "referral_fee": {"$round":[{"$ifNull": ["$product_ins.referral_fee", 0]},2]},
-                    "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
-                    "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
-                    "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
-                    "vendor_discount": {"$ifNull": ["$product_ins.vendor_discount", 0]},
-                    "product_cost": {"$round":[{"$ifNull": ["$product_ins.product_cost", 0]},2]},
-                    "w_product_cost": {"$ifNull": ["$product_ins.w_product_cost", 0]},
-                    "QuantityOrdered": {"$ifNull": ["$ProductDetails.QuantityOrdered", 1]},
-                }
+                "_id": 1,
+                "price": 1,
+                "tax_price": 1,
+                "promotion_discount": 1,
+                "ship_promotion_discount": 1,
+                "sku": 1,
+                "product_cost": 1,
+                "vendor_funding": 1,
+                "vendor_discount": 1,
+                "referral_fee": 1,
+                "QuantityOrdered": 1,
+                "Pricing": 1,
+                "charges": 1
             }
-        ]
-        return {
-            item["_id"]: item
-            for item in OrderItems.objects.aggregate(*pipeline)
-        }
-    def process_orders(orders):
-        all_item_ids = [item_id for order in orders for item_id in order["order_items"]]
-        item_map = fetch_item_details_bulk(all_item_ids)
-        grouped_orders = defaultdict(list)
-        for order in orders:
-            key = (order.get("marketplace_id"), order.get("currency"))
-            grouped_orders[key].append(order)
-        marketplace_metrics = defaultdict(lambda: {"currency_list": []})
-        for (mp_id, currency), order_list in grouped_orders.items():
-            gross_revenue = 0
-            total_cogs = 0
-            total_units = 0
-            tax_price = 0
-            total_product_cost = 0
-            temp_price = 0
-            refund=0
-            referral_fee_total = 0
-            referral_fee=0
-            shipping_cost=0
-            channel_fee=0
-            vendor_funding = 0
-            vendor_discount=0
-            ship_promotion_discount=0
-            promotion_discount=0
-            sku_set = set()
-            marketplace_name = marketplace_dict.get(str(mp_id), "")
-            for order in order_list:
-                gross_revenue += order["original_order_total"]
-                shipping_cost += order.get('shipping_price', 0) or 0  
-                for item_id in order['order_items']:
-                    item_data = item_map.get(item_id)
-                    if not item_data:
-                        continue
-                    price=item_data.get('price',0 or 0)
-                    if price==0 and hasattr(item_data,'charges'):
-                        price=sum(float(charge.get('chargeAmount',0)) for charge in item_data['charges'])
-                    temp_price+=price
-                    quantity = int(item_data.get('QuantityOrdered', 1) or 1)
-                    referral_fee = float(item_data.get('referral_fee', 0) or 0)
-                    promotion_discount+=float(item_data.get('promotion_discount',0) or 0)
-                    ship_promotion_discount+=float(item_data.get('ship_promotion_discount',0) or 0)
-                    referral_fee_total += referral_fee*quantity
-                    tax_price += float(item_data.get('tax_price') or 0)
-                    product_cost = float(item_data.get('product_cost', 0) or 0)
-                    total_cogs += product_cost * quantity
-                    total_units+=quantity
-                    vendor_funding += item_data['vendor_funding']*quantity
-                    vendor_discount += float(item_data.get('vendor_discount', 0) or 0)
-                    total_product_cost += item_data['price']
-                    if item_data.get('sku'):
-                        sku_set.add(item_data['sku'])
-                fulfillment_channel=order.get('fulfillment_channel',"")
-                merchant_shipment_cost=order.get('merchant_shipment_cost',0)
-                if merchant_shipment_cost is None:
-                    if fulfillment_channel=="AFN":
-                        merchant_shipment_cost=order.get('shipping_price',0)
-                    elif fulfillment_channel=='MFN':
-                        merchant_shipment_cost=order.get('merchant_shipment_cost',0)
-                        # order_details=get_full_order_and_shipping_details(order_number)
-                        # if order_details and order_details.get('shipments'):
-                        #     merchant_shipment_cost=float(order_details['shipments'][-1].get('shipmentCost', 0) or 0)
-                        #     order_obj = Order.objects(merchant_order_id=order_number).first()
-                        #     if order_obj:
-                        #         order_obj.merchant_shipment_cost=merchant_shipment_cost
-                        #         order_obj.save()
-                    elif fulfillment_channel=='SellerFulfilled':
-                        merchant_shipment_cost=order.get('merchant_shipment_cost',0)
-                        # customer_email=order.get('customer_email_id','')
-                        # order_date=order.get('order_date',None)
-                        # po_id=order.get('purchase_order_id','')
-                        # shipping_info=get_orders_by_customer_and_date(
-                        #             customer_email=customer_email,
-                        #             order_date_utc_iso=order_date,
-                        #             purchase_order_id=po_id,
-                        #             local_tz="US/Pacific"
-                        # )
-                        # if shipping_info:
-                        #     merchant_shipment_cost=float(shipping_info[-1].get('shipmentCost',0) or 0)
-                        #     order_obj=Order.objects(merchant_order_id=po_id).first()
-                        #     if order_obj:
-                        #         order_obj.update(set__merchant_shipment_cost=merchant_shipment_cost)
-                    else:    
-                        merchant_shipment_cost=float(merchant_shipment_cost or 0)
-                total_cogs+=merchant_shipment_cost
-            expenses = total_cogs + referral_fee_total
-            net_profit = (temp_price+ shipping_cost+promotion_discount+ vendor_funding- (referral_fee_total + total_cogs + vendor_discount+ship_promotion_discount+refund))
-            roi = (net_profit / expenses) * 100 if expenses > 0 else 0
-            margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
-            currency_data = {
-                "currency": currency,
-                "grossRevenue": round(gross_revenue, 2),
-                "expenses": round(expenses, 2),
-                "netProfit": round(net_profit, 2),
-                "roi": round(roi, 2),
-                "unitsSold": total_units,
-                "refunds": 0,
-                "skuCount": len(sku_set),
-                "margin": round(margin, 2),
-                "sessions": 0,
-                "pageViews": 0,
-                "unitSessionPercentage": 0,
-                "seller": "",
-                "tax_price": round(tax_price, 2),
-                "total_cogs": round(total_cogs, 2),
-                "product_cost": round(total_product_cost, 2),
-                "shipping_cost": 0
-            }
-            marketplace_metrics[marketplace_name]["currency_list"].append(currency_data)
-        return [
-            {
-                "image": (
-                    "https://i.pinimg.com/originals/01/ca/da/01cada77a0a7d326d85b7969fe26a728.jpg"
-                    if mp == "Amazon" else
-                    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRzjtf8dzq48TtkzeRYx2-_li3gTCkstX2juA&s"
-                    if mp == "Walmart" else ""
-                ),
-                "marketplace": mp,
-                "currency_list": data["currency_list"]
-            }
-            for mp, data in marketplace_metrics.items()
-        ]
-    def calculate_metrics(orders):
-        all_item_ids = [item_id for order in orders for item_id in order["order_items"]]
-        item_map = fetch_item_details_bulk(all_item_ids)
+        )
+
+        result = {}
+        for item in cursor:
+            result[item["_id"]] = item
+
+        perf_log("fetch_item_details_bulk_total", t0)
+        return result
+
+    # -------------------------
+    # METRICS
+    # -------------------------
+    def calculate_metrics(orders, item_map):
+        start = time.time()
+
         gross_revenue = 0
         total_cogs = 0
-        net_profit = 0
-        margin = 0
         total_units = 0
         temp_price = 0
-        promotion_discount=0
-        ship_promotion_discount=0
-        sku_set = set()
-        vendor_funding = 0
-        referral_fee_total = 0
         tax_price = 0
-        refund=0
-        shipping_cost=0
-        vendor_discount=0
+        referral_fee_total = 0
+        vendor_funding = 0
+        vendor_discount = 0
+        promotion_discount = 0
+        ship_promotion_discount = 0
+        shipping_cost = 0
+        sku_set = set()
+
         for order in orders:
-            gross_revenue += order['original_order_total']
-            shipping_cost+=order.get('shipping_price',0)
-            for item_id in order['order_items']:
-                item_data = item_map.get(item_id)
-                if not item_data:
+            gross_revenue += order.get('original_order_total', 0)
+            shipping_cost += order.get('shipping_price', 0) or 0
+
+            for item_id in order.get('order_items', []):
+                item = item_map.get(item_id)
+                if not item:
                     continue
-                temp_price += item_data['price']
-                promotion_discount+=float(item_data.get('promotion_discount',0)or 0)
-                ship_promotion_discount+=float(item_data.get('ship_promotion_discount',0)or 0)
-                product_cost=float(item_data.get('product_cost',0) or 0)
-                quantity=int(item_data.get('QuantityOrdered',1) or 1)
-                total_units+=quantity
-                referral_fee = float(item_data.get('referral_fee', 0) or 0)
-                referral_fee_total += referral_fee*quantity
-                tax_price += float(item_data.get('tax_price') or 0)
-                marketplace_name = order.get("marketplace_name", "Amazon")
-                total_cogs+=product_cost*quantity
-                vendor_funding += item_data['vendor_funding']*quantity
-                vendor_discount+=float(item_data.get('vendor_discount'))
-                if item_data.get('sku'):
-                    sku_set.add(item_data['sku'])
-            fulfillment_channel=order.get('fulfillment_channel',"")
-            merchant_shipment_cost=order.get('merchant_shipment_cost',0)
-            if merchant_shipment_cost is None:
-                if fulfillment_channel=="AFN":
-                    merchant_shipment_cost=order.get('shipping_price',0)
-                elif fulfillment_channel=='MFN':
-                    merchant_shipment_cost=order.get('merchant_shipment_cost',0)
-                elif fulfillment_channel=="SellerFulfilled":
-                    merchant_shipment_cost=order.get('merchant_shipment_cost',0)
-                else:
-                    merchant_shipment_cost=merchant_shipment_cost or 0
-            total_cogs+=merchant_shipment_cost
+
+                price = item.get('price', 0) or 0
+                qty = int(item.get('QuantityOrdered', 1) or 1)
+
+                temp_price += price
+                total_units += qty
+
+                referral_fee_total += (item.get('referral_fee', 0) or 0) * qty
+                tax_price += item.get('tax_price') or 0
+
+                product_cost = item.get('product_cost', 0) or 0
+                total_cogs += product_cost * qty
+
+                promotion_discount += item.get('promotion_discount', 0) or 0
+                ship_promotion_discount += item.get('ship_promotion_discount', 0) or 0
+
+                vendor_funding += (item.get('vendor_funding', 0) or 0) * qty
+                vendor_discount += item.get('vendor_discount', 0) or 0
+
+                if item.get('sku'):
+                    sku_set.add(item['sku'])
+
+            total_cogs += order.get('merchant_shipment_cost', 0) or 0
+
         expenses = total_cogs + referral_fee_total
-        net_profit = (temp_price + shipping_cost +promotion_discount+ vendor_funding - (referral_fee_total + total_cogs + vendor_discount+ship_promotion_discount+refund))
-        margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
-        roi = (net_profit / expenses) * 100 if expenses > 0 else 0
+
+        net_profit = (
+            temp_price +
+            shipping_cost +
+            promotion_discount +
+            vendor_funding -
+            (referral_fee_total + total_cogs + vendor_discount + ship_promotion_discount)
+        )
+
+        roi = (net_profit / expenses) * 100 if expenses else 0
+        margin = (net_profit / gross_revenue) * 100 if gross_revenue else 0
+
+        perf_log("calculate_metrics", start)
+
         return {
             "grossRevenue": round(gross_revenue, 2),
             "expenses": round(expenses, 2),
@@ -2287,38 +2693,147 @@ def allMarketplaceData(request):
             "seller": "",
             "tax_price": round(tax_price, 2),
             "total_cogs": round(total_cogs, 2),
-            "product_cost": round(gross_revenue, 2),
-            "shipping_cost": 0
-    }
-    def create_period_response(cur_from, cur_to, prev_from, prev_to):
-        current_orders = grossRevenue(cur_from, cur_to, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
-        previous_orders = grossRevenue(prev_from, prev_to, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
-        current = calculate_metrics(current_orders)
-        previous = calculate_metrics(previous_orders)
-        def with_delta(metric):
-            return {
-                "current": current[metric],
-                "previous": previous[metric],
-                "delta": round(current[metric] - previous[metric], 2)
+            "product_cost": round(temp_price, 2),
+            "shipping_cost": round(shipping_cost, 2)
+        }
+
+    # -------------------------
+    # PROCESS ORDERS
+    # -------------------------
+    def process_orders(orders, item_map):
+        start = time.time()
+
+        grouped = defaultdict(list)
+
+        for order in orders:
+            grouped[(order.get("marketplace_id"), order.get("currency"))].append(order)
+
+        marketplace_metrics = defaultdict(lambda: {"currency_list": []})
+
+        for (mp_id, currency), order_list in grouped.items():
+            gross = 0
+            units = 0
+            sku_set = set()
+
+            for order in order_list:
+                gross += order.get("original_order_total", 0)
+
+                for item_id in order.get("order_items", []):
+                    item = item_map.get(item_id)
+                    if not item:
+                        continue
+
+                    units += int(item.get("QuantityOrdered", 1) or 1)
+                    sku = item.get("sku")
+                    if sku:
+                        sku_set.add(sku)
+
+            marketplace_name = marketplace_map.get(str(mp_id), "")
+
+            marketplace_metrics[marketplace_name]["currency_list"].append({
+                "currency": currency,
+                "grossRevenue": round(gross, 2),
+                "expenses": 0,
+                "netProfit": 0,
+                "roi": 0,
+                "unitsSold": units,
+                "refunds": 0,
+                "skuCount": len(sku_set),
+                "margin": 0,
+                "sessions": 0,
+                "pageViews": 0,
+                "unitSessionPercentage": 0,
+                "seller": "",
+                "tax_price": 0,
+                "total_cogs": 0,
+                "product_cost": 0,
+                "shipping_cost": 0
+            })
+
+        perf_log("process_orders", start)
+
+        return [
+            {
+                "image": (
+                    "https://i.pinimg.com/originals/01/ca/da/01cada77a0a7d326d85b7969fe26a728.jpg"
+                    if mp == "Amazon" else
+                    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRzjtf8dzq48TtkzeRYx2-_li3gTCkstX2juA&s"
+                    if mp == "Walmart" else ""
+                ),
+                "marketplace": mp,
+                "currency_list": data["currency_list"]
             }
+            for mp, data in marketplace_metrics.items()
+        ]
+
+    # -------------------------
+    # MAIN FLOW
+    # -------------------------
+    t = time.time()
+    current_orders = grossRevenue(
+        from_date, to_date,
+        marketplace_id, brand_id,
+        product_id, manufacturer_name,
+        fulfillment_channel, timezone_str
+    )
+    perf_log("grossRevenue_current", t)
+
+    t = time.time()
+    prev_from, prev_to = get_date_range("previous_" + str(preset), timezone_str)
+
+    previous_orders = grossRevenue(
+        prev_from, prev_to,
+        marketplace_id, brand_id,
+        product_id, manufacturer_name,
+        fulfillment_channel, timezone_str
+    )
+    perf_log("grossRevenue_previous", t)
+
+    # -------------------------
+    # ITEM MAP (FAST)
+    # -------------------------
+    t = time.time()
+    all_item_ids = {
+        item_id
+        for order in current_orders
+        for item_id in order.get("order_items", [])
+    }
+
+    item_map = fetch_item_details_bulk(list(all_item_ids))
+    perf_log("item_map_build", t)
+
+    current = calculate_metrics(current_orders, item_map)
+    previous = calculate_metrics(previous_orders, item_map)
+    marketplace_list = process_orders(current_orders, item_map)
+
+    def with_delta(metric):
         return {
+            "current": current[metric],
+            "previous": previous[metric],
+            "delta": round(current[metric] - previous[metric], 2)
+        }
+
+    response_data = {
+        "custom": {
             "all_marketplace": {
-                metric: with_delta(metric) for metric in [
-                    "grossRevenue", "netProfit", "expenses", "unitsSold", "refunds",
-                    "skuCount", "sessions", "pageViews", "unitSessionPercentage", "margin", "roi"
+                metric: with_delta(metric)
+                for metric in [
+                    "grossRevenue", "netProfit", "expenses",
+                    "unitsSold", "refunds", "skuCount",
+                    "sessions", "pageViews",
+                    "unitSessionPercentage", "margin", "roi"
                 ]
             },
-            "marketplace_list": process_orders(current_orders)
-        }
-    custom_duration = to_date - from_date
-    prev_from_date = from_date - custom_duration
-    prev_to_date = to_date - custom_duration
-    response_data = {
-        "custom": create_period_response(from_date, to_date, prev_from_date, prev_to_date),
+            "marketplace_list": marketplace_list
+        },
         "from_date": from_date,
         "to_date": to_date
     }
+
+    perf_log("TOTAL_REQUEST_TIME", overall_start)
+
     return JsonResponse(response_data, safe=False)
+
 
 @csrf_exempt
 def allMarketplaceDataxl(request):
@@ -3298,202 +3813,401 @@ def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,ma
         "productCompleteness": product_completeness  
     }
     
+# @csrf_exempt
+# def getProfitAndLossDetails(request):
+#     def to_utc_format(dt):
+#         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+#     json_request = JSONParser().parse(request)
+#     marketplace_id = json_request.get('marketplace_id', None)
+#     brand_id = json_request.get('brand_id', [])
+#     product_id = json_request.get('product_id', [])
+#     manufacturer_name = json_request.get('manufacturer_name', [])
+#     fulfillment_channel = json_request.get('fulfillment_channel', None)
+#     preset = json_request.get('preset')
+#     timezone = 'US/Pacific'
+#     start_date = json_request.get("start_date", None)
+#     end_date = json_request.get("end_date", None)
+#     if start_date:
+#         from_date, to_date = convertdateTotimezone(start_date, end_date, timezone)
+#     else:
+#         from_date, to_date = get_date_range(preset, timezone)
+#     def pLcalculate_metrics(start_date, end_date, marketplace_id, brand_id, product_id,
+#                             manufacturer_name, fulfillment_channel, timezone):
+#         gross_revenue = total_cogs = refund = net_profit = margin = total_units = 0
+#         shipping_cost = channel_fee = product_cost = vendor_funding = tax_price = promotion_discount= ship_promotion_discount=temp_price = vendor_discount=0
+#         sku_set = set()
+#         product_categories = {}
+#         product_completeness = {"complete": 0, "incomplete": 0}
+#         result = grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id,
+#                               manufacturer_name, fulfillment_channel, timezone)
+#         all_item_ids = []
+#         for order in result:
+#             all_item_ids.extend(order['order_items'])
+#         item_pipeline = [
+#             {"$match": {"_id": {"$in": all_item_ids}}},
+#             {"$lookup": {
+#                 "from": "product",
+#                 "localField": "ProductDetails.product_id",
+#                 "foreignField": "_id",
+#                 "as": "product_ins"
+#             }},
+#             {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
+#             {"$project": {
+#                 "_id": 1,
+#                 "price": "$Pricing.ItemPrice.Amount",
+#                 "tax_price": "$Pricing.ItemTax.Amount",
+#                 "sku": "$product_ins.sku",
+#                 "category": "$product_ins.category",
+#                 "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
+#                 'promotion_discount':{"$ifNull":["$Pricing.PromotionDiscount.Amount",0]},
+#                 'ship_promotion_discount':{"$ifNull":["$Pricing.ShipPromotionDiscount.Amount",0]},
+#                 "vendor_discount": {"$ifNull": ["$product_ins.vendor_discount", 0]},
+#                 "a_shipping_cost": {"$ifNull": ["$product_ins.a_shipping_cost", 0]},
+#                 "w_shiping_cost": {"$ifNull": ["$product_ins.w_shiping_cost", 0]},
+#                 "referral_fee": {"$round":[{"$ifNull": ["$product_ins.referral_fee", 0]},2]},
+#                 "product_cost": {"$round":[{"$ifNull": ["$product_ins.product_cost", 0]},2]},
+#                 "QuantityOrdered": {"$ifNull": ["$ProductDetails.QuantityOrdered", 1]},
+#             }}
+#         ]
+#         item_results = list(OrderItems.objects.aggregate(*item_pipeline, allowDiskUse=True))
+#         item_lookup = {item['_id']: item for item in item_results}
+#         total_product_cost = 0
+#         for order in result:
+#             gross_revenue += order['original_order_total']
+#             total_units += order['items_order_quantity']
+#             shipping_cost += order.get('shipping_price', 0) or 0 
+#             for item_id in order['order_items']:
+#                 item_data = item_lookup.get(item_id)
+#                 if not item_data:
+#                     continue
+#                 price = item_data.get('price', 0) or 0
+#                 if price == 0 and 'charges' in item_data:
+#                     price = sum(float(charge.get('chargeAmount',0)) for charge in item_data['charges'])
+#                 temp_price += price
+#                 tax_price += float(item_data.get('tax_price', 0) or 0)
+#                 product_cost = float(item_data.get('product_cost', 0) or 0.0)
+#                 quantity = int(item_data.get('QuantityOrdered', 0) or 0)
+#                 total_cogs += product_cost * quantity
+#                 promotion_discount+=float(item_data.get('promotion_discount',0) or 0)
+#                 ship_promotion_discount+=float(item_data.get('ship_promotion_discount',0) or 0)
+#                 vendor_funding += float(item_data.get('vendor_funding', 0) or 0) * quantity
+#                 vendor_discount+=item_data['vendor_discount']
+#                 sku_set.add(item_data.get('sku'))
+#                 category = item_data.get('category', 'Unknown')
+#                 channel_fee += float(item_data.get("referral_fee", 0) or 0)*quantity
+#                 total_product_cost += product_cost * quantity
+#                 product_categories[category] = product_categories.get(category, 0) + 1
+#             fulfillment_channel = order.get('fulfillment_channel', "")
+#             merchant_shipment_cost =order.get('merchant_shipment_cost',0)
+#             if merchant_shipment_cost is None:
+#                 if fulfillment_channel == "AFN":
+#                     merchant_shipment_cost = order.get('shipping_price', 0) or 0
+#                 elif fulfillment_channel == 'MFN':
+#                     merchant_shipment_cost=order.get('merchant_shipment_cost',0)
+#                 elif fulfillment_channel=="SellerFulfilled":
+#                     merchant_shipment_cost=order.get('merchant_shipment_cost',0)
+#             else:
+#                 merchant_shipment_cost = merchant_shipment_cost or 0
+#             total_cogs += merchant_shipment_cost
+#             net_profit = (temp_price+ shipping_cost+promotion_discount+ vendor_funding- (channel_fee + total_cogs + vendor_discount+ship_promotion_discount))
+#             margin = (net_profit / gross_revenue) * 100 if gross_revenue else 0
+#         return {
+#             "grossRevenue": round(gross_revenue, 2),
+#             "expenses": round(total_cogs + channel_fee, 2),
+#             "netProfit": round(net_profit, 2),
+#             "roi": round((net_profit / total_cogs) * 100, 2) if total_cogs else 0,
+#             "unitsSold": total_units,
+#             "refunds": refund,
+#             "skuCount": len(sku_set),
+#             "sessions": 0,
+#             "pageViews": 0,
+#             "unitSessionPercentage": 0,
+#             "margin": round(margin, 2),
+#             "seller": "",
+#             "tax_price": tax_price,
+#             "total_cogs": total_cogs,
+#             "product_cost": total_product_cost,
+#             "shipping_cost": shipping_cost,
+#             "productCategories": product_categories,
+#             "productCompleteness": product_completeness,
+#             "base_price": temp_price,
+#             "channel_fee": channel_fee
+#         }
+    
+#     def create_period_response(label, cur_from, cur_to, prev_from, prev_to,
+#                                marketplace_id, brand_id, product_id,
+#                                manufacturer_name, fulfillment_channel, preset, timezone):
+#         current = pLcalculate_metrics(cur_from, cur_to, marketplace_id, brand_id, product_id,
+#                                       manufacturer_name, fulfillment_channel, timezone)
+#         previous = pLcalculate_metrics(prev_from, prev_to, marketplace_id, brand_id, product_id,
+#                                        manufacturer_name, fulfillment_channel, timezone)
+#         def with_delta(metric):
+#             return {
+#                 "current": current[metric],
+#                 "previous": previous[metric],
+#                 "delta": round(current[metric] - previous[metric], 2)
+#             }
+#         summary = {metric: with_delta(metric) for metric in [
+#             "grossRevenue", "netProfit", "expenses", "unitsSold",
+#             "refunds", "skuCount", "sessions", "pageViews",
+#             "unitSessionPercentage", "margin", "roi", "channel_fee"]}
+#         netProfitCalculation = {
+#             "current": {
+#                 "gross": current["grossRevenue"],
+#                 "totalCosts": current["expenses"],
+#                 "productRefunds": current["refunds"],
+#                 "totalTax": current["tax_price"],
+#                 "totalTaxWithheld": 0,
+#                 "ppcProductCost": 0,
+#                 "ppcBrandsCost": 0,
+#                 "ppcDisplayCost": 0,
+#                 "ppcStCost": 0,
+#                 "cogs": current["total_cogs"],
+#                 "product_cost": current["product_cost"],
+#                 "base_price": current["base_price"],
+#                 "shipping_cost": current["shipping_cost"],
+#                 "channel_fee": current["channel_fee"]
+#             },
+#             "previous": {
+#                 "gross": previous["grossRevenue"],
+#                 "totalCosts": previous["expenses"],
+#                 "productRefunds": previous["refunds"],
+#                 "totalTax": previous["total_cogs"],
+#                 "totalTaxWithheld": 0,
+#                 "ppcProductCost": 0,
+#                 "ppcBrandsCost": 0,
+#                 "ppcDisplayCost": 0,
+#                 "ppcStCost": 0,
+#                 "cogs": previous["total_cogs"],
+#                 "product_cost": previous["product_cost"],
+#                 "base_price": current["base_price"],
+#                 "shipping_cost": previous["shipping_cost"],
+#                 "channel_fee": previous["channel_fee"]
+#             }
+#         }
+#         date_ranges = {
+#             "current": {"from": to_utc_format(cur_from)},
+#             "previous": {"from": to_utc_format(prev_from)}
+#         }
+#         if preset not in ['Today', 'Yesterday']:
+#             date_ranges["current"]["to"] = to_utc_format(cur_to)
+#             date_ranges["previous"]["to"] = to_utc_format(prev_to)
+#         return {
+#             "dateRanges": date_ranges,
+#             "summary": summary,
+#             "netProfitCalculation": netProfitCalculation,
+#             "charts": {
+#                 "productDistribution": current["productCategories"],
+#                 "productCompleteness": current["productCompleteness"]
+#             }
+#         }
+#     custom_duration = to_date - from_date
+#     prev_from_date = from_date - custom_duration
+#     prev_to_date = to_date - custom_duration
+#     response_data = {
+#         "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date,
+#                                           marketplace_id, brand_id, product_id, manufacturer_name,
+#                                           fulfillment_channel, preset, timezone)
+#     }
+#     return JsonResponse(response_data, safe=False)
+
 @csrf_exempt
 def getProfitAndLossDetails(request):
-    def to_utc_format(dt):
-        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    import time
+    from django.http import JsonResponse
+    from rest_framework.parsers import JSONParser
+    from concurrent.futures import ThreadPoolExecutor
+
+    def log(label, start):
+        print(f"[PERF] {label}: {(time.time() - start) * 1000:.2f} ms")
+
+    def chunk_list(data, size=1000):
+        for i in range(0, len(data), size):
+            yield data[i:i + size]
+
+    t0 = time.time()
     json_request = JSONParser().parse(request)
-    marketplace_id = json_request.get('marketplace_id', None)
+
+    marketplace_id = json_request.get('marketplace_id')
     brand_id = json_request.get('brand_id', [])
     product_id = json_request.get('product_id', [])
     manufacturer_name = json_request.get('manufacturer_name', [])
-    fulfillment_channel = json_request.get('fulfillment_channel', None)
+    fulfillment_channel = json_request.get('fulfillment_channel')
     preset = json_request.get('preset')
-    timezone = 'US/Pacific'
-    start_date = json_request.get("start_date", None)
-    end_date = json_request.get("end_date", None)
+
+    timezone = json_request.get("timezone", "US/Pacific")
+    start_date = json_request.get("start_date")
+    end_date = json_request.get("end_date")
+
+    # ---------------- DATE RANGE ----------------
+    t = time.time()
     if start_date:
         from_date, to_date = convertdateTotimezone(start_date, end_date, timezone)
     else:
         from_date, to_date = get_date_range(preset, timezone)
-    def pLcalculate_metrics(start_date, end_date, marketplace_id, brand_id, product_id,
-                            manufacturer_name, fulfillment_channel, timezone):
-        gross_revenue = total_cogs = refund = net_profit = margin = total_units = 0
-        shipping_cost = channel_fee = product_cost = vendor_funding = tax_price = promotion_discount= ship_promotion_discount=temp_price = vendor_discount=0
+    log("date_range", t)
+
+    duration = to_date - from_date
+    prev_from = from_date - duration
+    prev_to = to_date - duration
+
+    # ---------------- SHARED ITEM FETCH ----------------
+    def fetch_items(item_ids):
+        unique_ids = list(set(item_ids))
+        item_map = {}
+
+        for batch in chunk_list(unique_ids, 1000):
+            cursor = OrderItems._get_collection().find(
+                {"_id": {"$in": batch}},
+                {
+                    "_id": 1,
+                    "price": 1,
+                    "tax_price": 1,
+                    "promotion_discount": 1,
+                    "ship_promotion_discount": 1,
+                    "sku": 1,
+                    "product_cost": 1,
+                    "vendor_funding": 1,
+                    "vendor_discount": 1,
+                    "referral_fee": 1,
+                    "QuantityOrdered": 1,
+                    "category": 1
+                }
+            )
+            for i in cursor:
+                item_map[i["_id"]] = i
+
+        return item_map
+
+    # ---------------- CORE FUNCTION ----------------
+    def calculate(start, end):
+        t_call = time.time()
+
+        result = grossRevenue(
+            start, end,
+            marketplace_id, brand_id,
+            product_id, manufacturer_name,
+            fulfillment_channel, timezone
+        )
+
+        log("grossRevenue_call", t_call)
+
+        # collect items
+        t_items = time.time()
+        item_ids = []
+        for o in result:
+            item_ids.extend(o.get("order_items", []))
+
+        item_map = fetch_items(item_ids)
+        log("item_lookup", t_items)
+
+        # compute metrics
+        t_proc = time.time()
+
+        gross = shipping = temp_price = tax = 0
+        cogs = vendor_funding = vendor_discount = 0
+        promo = ship_promo = channel_fee = 0
+        units = 0
         sku_set = set()
-        product_categories = {}
-        product_completeness = {"complete": 0, "incomplete": 0}
-        result = grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id,
-                              manufacturer_name, fulfillment_channel, timezone)
-        all_item_ids = []
+
         for order in result:
-            all_item_ids.extend(order['order_items'])
-        item_pipeline = [
-            {"$match": {"_id": {"$in": all_item_ids}}},
-            {"$lookup": {
-                "from": "product",
-                "localField": "ProductDetails.product_id",
-                "foreignField": "_id",
-                "as": "product_ins"
-            }},
-            {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
-            {"$project": {
-                "_id": 1,
-                "price": "$Pricing.ItemPrice.Amount",
-                "tax_price": "$Pricing.ItemTax.Amount",
-                "sku": "$product_ins.sku",
-                "category": "$product_ins.category",
-                "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
-                'promotion_discount':{"$ifNull":["$Pricing.PromotionDiscount.Amount",0]},
-                'ship_promotion_discount':{"$ifNull":["$Pricing.ShipPromotionDiscount.Amount",0]},
-                "vendor_discount": {"$ifNull": ["$product_ins.vendor_discount", 0]},
-                "a_shipping_cost": {"$ifNull": ["$product_ins.a_shipping_cost", 0]},
-                "w_shiping_cost": {"$ifNull": ["$product_ins.w_shiping_cost", 0]},
-                "referral_fee": {"$round":[{"$ifNull": ["$product_ins.referral_fee", 0]},2]},
-                "product_cost": {"$round":[{"$ifNull": ["$product_ins.product_cost", 0]},2]},
-                "QuantityOrdered": {"$ifNull": ["$ProductDetails.QuantityOrdered", 1]},
-            }}
-        ]
-        item_results = list(OrderItems.objects.aggregate(*item_pipeline, allowDiskUse=True))
-        item_lookup = {item['_id']: item for item in item_results}
-        total_product_cost = 0
-        for order in result:
-            gross_revenue += order['original_order_total']
-            total_units += order['items_order_quantity']
-            shipping_cost += order.get('shipping_price', 0) or 0 
-            for item_id in order['order_items']:
-                item_data = item_lookup.get(item_id)
-                if not item_data:
+            gross += order.get("original_order_total", 0)
+            shipping += order.get("shipping_price", 0) or 0
+
+            for item_id in order.get("order_items", []):
+                item = item_map.get(item_id)
+                if not item:
                     continue
-                price = item_data.get('price', 0) or 0
-                if price == 0 and 'charges' in item_data:
-                    price = sum(float(charge.get('chargeAmount',0)) for charge in item_data['charges'])
+
+                qty = int(item.get("QuantityOrdered", 1) or 1)
+
+                price = item.get("price", 0) or 0
+                tax += item.get("tax_price", 0) or 0
+
                 temp_price += price
-                tax_price += float(item_data.get('tax_price', 0) or 0)
-                product_cost = float(item_data.get('product_cost', 0) or 0.0)
-                quantity = int(item_data.get('QuantityOrdered', 0) or 0)
-                total_cogs += product_cost * quantity
-                promotion_discount+=float(item_data.get('promotion_discount',0) or 0)
-                ship_promotion_discount+=float(item_data.get('ship_promotion_discount',0) or 0)
-                vendor_funding += float(item_data.get('vendor_funding', 0) or 0) * quantity
-                vendor_discount+=item_data['vendor_discount']
-                sku_set.add(item_data.get('sku'))
-                category = item_data.get('category', 'Unknown')
-                channel_fee += float(item_data.get("referral_fee", 0) or 0)*quantity
-                total_product_cost += product_cost * quantity
-                product_categories[category] = product_categories.get(category, 0) + 1
-            fulfillment_channel = order.get('fulfillment_channel', "")
-            merchant_shipment_cost =order.get('merchant_shipment_cost',0)
-            if merchant_shipment_cost is None:
-                if fulfillment_channel == "AFN":
-                    merchant_shipment_cost = order.get('shipping_price', 0) or 0
-                elif fulfillment_channel == 'MFN':
-                    merchant_shipment_cost=order.get('merchant_shipment_cost',0)
-                elif fulfillment_channel=="SellerFulfilled":
-                    merchant_shipment_cost=order.get('merchant_shipment_cost',0)
-            else:
-                merchant_shipment_cost = merchant_shipment_cost or 0
-            total_cogs += merchant_shipment_cost
-            net_profit = (temp_price+ shipping_cost+promotion_discount+ vendor_funding- (channel_fee + total_cogs + vendor_discount+ship_promotion_discount))
-            margin = (net_profit / gross_revenue) * 100 if gross_revenue else 0
+
+                cogs += (item.get("product_cost", 0) or 0) * qty
+                vendor_funding += (item.get("vendor_funding", 0) or 0) * qty
+                vendor_discount += item.get("vendor_discount", 0) or 0
+
+                promo += item.get("promotion_discount", 0) or 0
+                ship_promo += item.get("ship_promotion_discount", 0) or 0
+                channel_fee += (item.get("referral_fee", 0) or 0) * qty
+
+                units += qty
+
+                if item.get("sku"):
+                    sku_set.add(item["sku"])
+
+            cogs += order.get("merchant_shipment_cost", 0) or 0
+
+        expenses = cogs + channel_fee
+
+        net_profit = (
+            temp_price +
+            shipping +
+            promo +
+            vendor_funding -
+            (channel_fee + cogs + vendor_discount + ship_promo)
+        )
+
+        margin = (net_profit / gross) * 100 if gross else 0
+        roi = (net_profit / expenses) * 100 if expenses else 0
+
+        log("calculate_metrics", t_proc)
+
         return {
-            "grossRevenue": round(gross_revenue, 2),
-            "expenses": round(total_cogs + channel_fee, 2),
+            "grossRevenue": round(gross, 2),
             "netProfit": round(net_profit, 2),
-            "roi": round((net_profit / total_cogs) * 100, 2) if total_cogs else 0,
-            "unitsSold": total_units,
-            "refunds": refund,
+            "expenses": round(expenses, 2),
+            "unitsSold": units,
             "skuCount": len(sku_set),
-            "sessions": 0,
-            "pageViews": 0,
-            "unitSessionPercentage": 0,
             "margin": round(margin, 2),
-            "seller": "",
-            "tax_price": tax_price,
-            "total_cogs": total_cogs,
-            "product_cost": total_product_cost,
-            "shipping_cost": shipping_cost,
-            "productCategories": product_categories,
-            "productCompleteness": product_completeness,
-            "base_price": temp_price,
-            "channel_fee": channel_fee
+            "roi": round(roi, 2),
+            "shipping_cost": round(shipping, 2),
+            "tax_price": round(tax, 2)
         }
-    def create_period_response(label, cur_from, cur_to, prev_from, prev_to,
-                               marketplace_id, brand_id, product_id,
-                               manufacturer_name, fulfillment_channel, preset, timezone):
-        current = pLcalculate_metrics(cur_from, cur_to, marketplace_id, brand_id, product_id,
-                                      manufacturer_name, fulfillment_channel, timezone)
-        previous = pLcalculate_metrics(prev_from, prev_to, marketplace_id, brand_id, product_id,
-                                       manufacturer_name, fulfillment_channel, timezone)
-        def with_delta(metric):
-            return {
-                "current": current[metric],
-                "previous": previous[metric],
-                "delta": round(current[metric] - previous[metric], 2)
-            }
-        summary = {metric: with_delta(metric) for metric in [
-            "grossRevenue", "netProfit", "expenses", "unitsSold",
-            "refunds", "skuCount", "sessions", "pageViews",
-            "unitSessionPercentage", "margin", "roi", "channel_fee"]}
-        netProfitCalculation = {
-            "current": {
-                "gross": current["grossRevenue"],
-                "totalCosts": current["expenses"],
-                "productRefunds": current["refunds"],
-                "totalTax": current["tax_price"],
-                "totalTaxWithheld": 0,
-                "ppcProductCost": 0,
-                "ppcBrandsCost": 0,
-                "ppcDisplayCost": 0,
-                "ppcStCost": 0,
-                "cogs": current["total_cogs"],
-                "product_cost": current["product_cost"],
-                "base_price": current["base_price"],
-                "shipping_cost": current["shipping_cost"],
-                "channel_fee": current["channel_fee"]
-            },
-            "previous": {
-                "gross": previous["grossRevenue"],
-                "totalCosts": previous["expenses"],
-                "productRefunds": previous["refunds"],
-                "totalTax": previous["total_cogs"],
-                "totalTaxWithheld": 0,
-                "ppcProductCost": 0,
-                "ppcBrandsCost": 0,
-                "ppcDisplayCost": 0,
-                "ppcStCost": 0,
-                "cogs": previous["total_cogs"],
-                "product_cost": previous["product_cost"],
-                "base_price": current["base_price"],
-                "shipping_cost": previous["shipping_cost"],
-                "channel_fee": previous["channel_fee"]
-            }
-        }
-        date_ranges = {
-            "current": {"from": to_utc_format(cur_from)},
-            "previous": {"from": to_utc_format(prev_from)}
-        }
-        if preset not in ['Today', 'Yesterday']:
-            date_ranges["current"]["to"] = to_utc_format(cur_to)
-            date_ranges["previous"]["to"] = to_utc_format(prev_to)
+
+    # ---------------- PARALLEL EXECUTION ----------------
+    t = time.time()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        future_current = executor.submit(calculate, from_date, to_date)
+        future_previous = executor.submit(calculate, prev_from, prev_to)
+
+        current = future_current.result()
+        previous = future_previous.result()
+
+    log("parallel_execution", t)
+
+    def delta(metric):
         return {
-            "dateRanges": date_ranges,
-            "summary": summary,
-            "netProfitCalculation": netProfitCalculation,
-            "charts": {
-                "productDistribution": current["productCategories"],
-                "productCompleteness": current["productCompleteness"]
-            }
+            "current": current[metric],
+            "previous": previous[metric],
+            "delta": round(current[metric] - previous[metric], 2)
         }
-    custom_duration = to_date - from_date
-    prev_from_date = from_date - custom_duration
-    prev_to_date = to_date - custom_duration
+
     response_data = {
-        "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date,
-                                          marketplace_id, brand_id, product_id, manufacturer_name,
-                                          fulfillment_channel, preset, timezone)
+        "custom": {
+            "summary": {
+                k: delta(k) for k in [
+                    "grossRevenue", "netProfit", "expenses",
+                    "unitsSold", "skuCount", "margin", "roi"
+                ]
+            },
+            "netProfitCalculation": {
+                "current": current,
+                "previous": previous
+            }
+        },
+        "from_date": from_date,
+        "to_date": to_date
     }
+
+    log("TOTAL", t0)
+
     return JsonResponse(response_data, safe=False)
+
 
 @csrf_exempt
 def profit_loss_chart(request):
@@ -4761,10 +5475,8 @@ def productsTrafficandConversions(request):
     data['page_views_graph'] = page_views_graph
     return data
 
-from django.views.decorators.cache import cache_page
 
 @csrf_exempt
-@cache_page(60 * 10)
 def getSKUlist(request):
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id')
@@ -4806,7 +5518,6 @@ def getSKUlist(request):
 
 
 @csrf_exempt
-@cache_page(60 * 10)
 def getproductIdlist(request):
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id')
@@ -4853,7 +5564,6 @@ def getproductIdlist(request):
 
 
 @csrf_exempt
-@cache_page(60 * 10)
 def getBrandListforfilter(request):
     start_time = time.time()
     data = dict()
@@ -4912,7 +5622,6 @@ def getBrandListforfilter(request):
 
 
 @csrf_exempt
-@cache_page(60 * 10)
 def obtainManufactureNames(request):
     marketplace_id = request.GET.get('marketplace_id')
     search_query = request.GET.get('search_query')

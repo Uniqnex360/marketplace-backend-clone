@@ -263,7 +263,8 @@ class OrderItems(Document):
             'ProductDetails.product_id',
             'created_date',
             ['created_date', 'ProductDetails.product_id']
-        ]
+        ],
+        "strict": False,
     }
 class Order(Document):
     # Tracking IDs

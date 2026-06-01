@@ -189,101 +189,286 @@ def get_date_range(preset, time_zone_str="UTC"):
     elif preset == "Last Year":
         return today.replace(year=today.year - 1, month=1, day=1), today.replace(year=today.year - 1, month=12, day=31, hour=23, minute=59, second=59)
     return today, (today + timedelta(days=1)).replace(hour=23, minute=59, second=59)
-def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None, 
-                 product_id=None, manufacuture_name=[], fulfillment_channel=None, 
-                 timezone='UTC'):    
+
+
+# def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None, 
+#                  product_id=None, manufacuture_name=[], fulfillment_channel=None, 
+#                  timezone='UTC'):    
+#     if timezone != 'UTC':
+#         start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone)
+#     start_date = start_date.replace(tzinfo=None)
+#     end_date = end_date.replace(tzinfo=None)
+#     pipeline = [{"$project": {"_id": 1, "name": 1, "image_url": 1}}]
+#     marketplace_list = list(Marketplace.objects.aggregate(*pipeline))
+#     match = {
+#         'order_date': {"$gte": start_date, "$lte": end_date},
+#         'order_status': {"$nin": ["Canceled", "Cancelled"]},
+#         'order_total': {"$gt": 0}
+#     }
+#     if fulfillment_channel:
+#         match['fulfillment_channel'] = fulfillment_channel
+#     if marketplace_id not in [None, "", "all", "custom"]:
+#         match['marketplace_id'] = ObjectId(marketplace_id)
+#     if manufacuture_name not in [None, "", []]:
+#         ids = getproductIdListBasedonManufacture(manufacuture_name, start_date, end_date)
+#         match["_id"] = {"$in": ids}
+#     elif product_id not in [None, "", []]:
+#         product_id = [ObjectId(pid) for pid in product_id]
+#         ids = getOrdersListBasedonProductId(product_id, start_date, end_date)
+#         match["_id"] = {"$in": ids}
+#     elif brand_id not in [None, "", []]:
+#         brand_id = [ObjectId(bid) for bid in brand_id]
+#         ids = getproductIdListBasedonbrand(brand_id, start_date, end_date)
+#         match["_id"] = {"$in": ids}
+#     pipeline = [
+#         {"$match": match},
+#         {"$project": {
+#             "_id": 1,
+#             "order_date": 1,
+#             "purchase_order_id": 1,
+#             "order_items": 1,
+#             "order_total": 1,
+#             "order_status": 1,
+#             "fulfillment_channel": 1,
+#             "merchant_order_id": 1,
+#             "seller_order_id": 1,
+#             "customer_email_id": 1,
+#             "marketplace_id": 1,
+#             "currency": 1,
+#             "shipping_address": 1,
+#             "shipping_information": 1,
+#             "shipping_price": {"$ifNull": ["$shipping_price", 0.0]},
+#             "merchant_shipment_cost": {"$ifNull": ["$merchant_shipment_cost", 0.0]},
+#             "items_order_quantity": {"$size": {"$ifNull": ["$order_items", []]}},
+#         }}
+#     ]
+#     order_list = list(Order.objects.aggregate(*pipeline))
+#     all_order_item_ids = []
+#     for order_ins in order_list:
+#         all_order_item_ids.extend(order_ins['order_items'])
+#     order_items_lookup = {}
+#     if all_order_item_ids:
+#         order_items = OrderItems.objects(id__in=all_order_item_ids)
+#         for item in order_items:
+#             order_items_lookup[item.id] = item
+#     for order_ins in order_list:
+#         for marketplace in marketplace_list:
+#             order_ins['marketplace_name'] = marketplace['name']
+#         tax_sum = 0.0
+#         item_price = 0.0
+#         for item_id in order_ins['order_items']:
+#             item = order_items_lookup.get(item_id)
+#             tax = 0.0
+#             price = 0.0
+#             if not item:
+#                 continue
+#             if hasattr(item, 'Pricing'):
+#                 if hasattr(item.Pricing, 'ItemPrice') and hasattr(item.Pricing.ItemPrice, 'Amount'):
+#                     try:
+#                         price = float(item.Pricing.ItemPrice.Amount)
+#                     except Exception:
+#                         price = 0.0
+#                 if hasattr(item.Pricing, 'ItemTax') and hasattr(item.Pricing.ItemTax, 'Amount'):
+#                     try:
+#                         tax = float(item.Pricing.ItemTax.Amount)
+#                     except Exception:
+#                         tax = 0.0
+#             elif hasattr(item, 'charges'):
+#                 for charge in item.charges:
+#                     if hasattr(charge, 'chargeAmount'):
+#                         try:
+#                             price += float(charge.chargeAmount)
+#                         except Exception:
+#                             price += 0.0
+#             item_price += price
+#             tax_sum += tax
+#         original_order_total = order_ins.get('order_total', 0.0)
+#         order_ins['original_order_total'] = round(item_price, 2)
+#         order_ins['order_total'] = round(original_order_total - tax_sum, 2)
+#     return order_list
+
+import time
+from bson import ObjectId
+
+def grossRevenue(
+    start_date,
+    end_date,
+    marketplace_id=None,
+    brand_id=None,
+    product_id=None,
+    manufacuture_name=[],
+    fulfillment_channel=None,
+    timezone='UTC'
+):
+    t0 = time.time()
+
+    # -------------------------
+    # TIMEZONE
+    # -------------------------
     if timezone != 'UTC':
         start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone)
+
     start_date = start_date.replace(tzinfo=None)
     end_date = end_date.replace(tzinfo=None)
-    pipeline = [{"$project": {"_id": 1, "name": 1, "image_url": 1}}]
-    marketplace_list = list(Marketplace.objects.aggregate(*pipeline))
-    match = {
-        'order_date': {"$gte": start_date, "$lte": end_date},
-        'order_status': {"$nin": ["Canceled", "Cancelled"]},
-        'order_total': {"$gt": 0}
+
+    # -------------------------
+    # MARKETPLACE MAP (OPTIMIZED)
+    # -------------------------
+    marketplace_list = list(
+        Marketplace.objects.aggregate(
+            {"$project": {"_id": 1, "name": 1}}
+        )
+    )
+
+    marketplace_map = {
+        str(m["_id"]): m["name"]
+        for m in marketplace_list
     }
+
+    # -------------------------
+    # MATCH
+    # -------------------------
+    match = {
+        "order_date": {"$gte": start_date, "$lte": end_date},
+        "order_status": {"$nin": ["Canceled", "Cancelled"]},
+        "order_total": {"$gt": 0}
+    }
+
     if fulfillment_channel:
-        match['fulfillment_channel'] = fulfillment_channel
+        match["fulfillment_channel"] = fulfillment_channel
+
     if marketplace_id not in [None, "", "all", "custom"]:
-        match['marketplace_id'] = ObjectId(marketplace_id)
+        match["marketplace_id"] = ObjectId(marketplace_id)
+
     if manufacuture_name not in [None, "", []]:
         ids = getproductIdListBasedonManufacture(manufacuture_name, start_date, end_date)
         match["_id"] = {"$in": ids}
+
     elif product_id not in [None, "", []]:
         product_id = [ObjectId(pid) for pid in product_id]
         ids = getOrdersListBasedonProductId(product_id, start_date, end_date)
         match["_id"] = {"$in": ids}
+
     elif brand_id not in [None, "", []]:
         brand_id = [ObjectId(bid) for bid in brand_id]
         ids = getproductIdListBasedonbrand(brand_id, start_date, end_date)
         match["_id"] = {"$in": ids}
+
+    # -------------------------
+    # ORDER FETCH (LEAN)
+    # -------------------------
     pipeline = [
         {"$match": match},
-        {"$project": {
-            "_id": 1,
-            "order_date": 1,
-            "purchase_order_id": 1,
-            "order_items": 1,
-            "order_total": 1,
-            "order_status": 1,
-            "fulfillment_channel": 1,
-            "merchant_order_id": 1,
-            "seller_order_id": 1,
-            "customer_email_id": 1,
-            "marketplace_id": 1,
-            "currency": 1,
-            "shipping_address": 1,
-            "shipping_information": 1,
-            "shipping_price": {"$ifNull": ["$shipping_price", 0.0]},
-            "merchant_shipment_cost": {"$ifNull": ["$merchant_shipment_cost", 0.0]},
-            "items_order_quantity": {"$size": {"$ifNull": ["$order_items", []]}},
-        }}
+        {
+            "$project": {
+                "_id": 1,
+                "order_items": 1,
+                "order_total": 1,
+                "shipping_price": 1,
+                "merchant_shipment_cost": 1,
+                "marketplace_id": 1,
+                "currency": 1,
+            }
+        }
     ]
-    order_list = list(Order.objects.aggregate(*pipeline))
-    all_order_item_ids = []
-    for order_ins in order_list:
-        all_order_item_ids.extend(order_ins['order_items'])
+
+    order_list = list(Order._get_collection().aggregate(pipeline))
+
+    print(f"[PERF] order_fetch: {(time.time() - t0)*1000:.2f} ms")
+
+    # -------------------------
+    # FLATTEN ITEM IDS (FAST SET)
+    # -------------------------
+    item_ids = set()
+    for order in order_list:
+        item_ids.update(order.get("order_items") or [])
+
+    item_ids = list(item_ids)
+
     order_items_lookup = {}
-    if all_order_item_ids:
-        order_items = OrderItems.objects(id__in=all_order_item_ids)
-        for item in order_items:
-            order_items_lookup[item.id] = item
-    for order_ins in order_list:
-        for marketplace in marketplace_list:
-            order_ins['marketplace_name'] = marketplace['name']
+
+    # -------------------------
+    # ITEM FETCH (FAST + RAW)
+    # -------------------------
+    if item_ids:
+        t1 = time.time()
+
+        cursor = OrderItems._get_collection().find(
+            {"_id": {"$in": item_ids}},
+            {
+                "_id": 1,
+                "Pricing": 1,
+                "charges": 1,
+                "sku": 1,
+                "QuantityOrdered": 1,
+                "product_cost": 1,
+                "vendor_funding": 1,
+                "vendor_discount": 1,
+                "promotion_discount": 1,
+                "ship_promotion_discount": 1,
+                "referral_fee": 1,
+                "tax_price": 1,
+            }
+        )
+
+        # FAST DICT BUILD
+        for item in cursor:
+            order_items_lookup[item["_id"]] = item
+
+        print(f"[PERF] item_lookup: {(time.time() - t1)*1000:.2f} ms")
+
+    # -------------------------
+    # PROCESS ORDERS (OPTIMIZED LOOP)
+    # -------------------------
+    t2 = time.time()
+
+    for order in order_list:
+
+        items = order.get("order_items") or []
+
         tax_sum = 0.0
         item_price = 0.0
-        for item_id in order_ins['order_items']:
-            item = order_items_lookup.get(item_id)
-            tax = 0.0
-            price = 0.0
+
+        lookup = order_items_lookup  # local ref (faster)
+
+        for item_id in items:
+            item = lookup.get(item_id)
             if not item:
                 continue
-            if hasattr(item, 'Pricing'):
-                if hasattr(item.Pricing, 'ItemPrice') and hasattr(item.Pricing.ItemPrice, 'Amount'):
-                    try:
-                        price = float(item.Pricing.ItemPrice.Amount)
-                    except Exception:
-                        price = 0.0
-                if hasattr(item.Pricing, 'ItemTax') and hasattr(item.Pricing.ItemTax, 'Amount'):
-                    try:
-                        tax = float(item.Pricing.ItemTax.Amount)
-                    except Exception:
-                        tax = 0.0
-            elif hasattr(item, 'charges'):
-                for charge in item.charges:
-                    if hasattr(charge, 'chargeAmount'):
-                        try:
-                            price += float(charge.chargeAmount)
-                        except Exception:
-                            price += 0.0
+
+            pricing = item.get("Pricing") or {}
+
+            price_obj = pricing.get("ItemPrice") or {}
+            tax_obj = pricing.get("ItemTax") or {}
+
+            price = float(price_obj.get("Amount") or 0)
+            tax = float(tax_obj.get("Amount") or 0)
+
+            # fallback charges
+            if price == 0 and item.get("charges"):
+                price = sum(
+                    float(c.get("chargeAmount") or 0)
+                    for c in item["charges"]
+                )
+
             item_price += price
             tax_sum += tax
-        original_order_total = order_ins.get('order_total', 0.0)
-        order_ins['original_order_total'] = round(item_price, 2)
-        order_ins['order_total'] = round(original_order_total - tax_sum, 2)
+
+        order["original_order_total"] = round(item_price, 2)
+        order["order_total"] = round(order.get("order_total", 0) - tax_sum, 2)
+
+        # FIX: constant lookup (no loop)
+        order["marketplace_name"] = marketplace_map.get(
+            str(order.get("marketplace_id")),
+            ""
+        )
+
+    print(f"[PERF] order_processing: {(time.time() - t2)*1000:.2f} ms")
+    print(f"[PERF] grossRevenue_total: {(time.time() - t0)*1000:.2f} ms")
+
     return order_list
+
+
 def get_previous_periods(current_start, current_end):
     period_duration = current_end - current_start
     if period_duration.days > 1:
