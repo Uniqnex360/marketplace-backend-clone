@@ -4,6 +4,7 @@ from clickhouse.views import clickhouse_test_url, sandbox_clickhouse
 from clickhouse.helpers import (
     migrate_mongo_order_item_to_clickhouse,
     get_metrics_by_date_range_clickhouse,
+    create_fact_order_items_table,
 )
 
 urlpatterns = [
@@ -21,5 +22,11 @@ urlpatterns = [
         "get_metrics_by_date_range_clickhouse/",
         get_metrics_by_date_range_clickhouse,
         name="get_metrics_by_date_range_clickhouse",
+    ),
+    #create index urls
+    path(
+        "create_fact_order_items_table/",
+        create_fact_order_items_table,
+        name="create_fact_order_items_table",
     ),
 ]

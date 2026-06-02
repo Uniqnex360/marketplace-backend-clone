@@ -88,3 +88,66 @@ def get_metrics_by_date_range_clickhouse(request):
     }
 
     return metrics
+
+
+@csrf_exempt
+def create_fact_order_items_table(request):
+    if request.method != "POST":
+        return {"error": "Only POST allowed"}
+
+    try:
+        query = """
+        CREATE TABLE IF NOT EXISTS fact_order_items
+        (
+            order_id String,
+            order_item_id String,
+            purchase_order_id String,
+
+            order_date DateTime,
+            order_date_day Date,
+
+            marketplace_id String,
+            fulfillment_channel String,
+            brand_id String,
+            manufacturer_name String,
+            product_id String,
+            sku String,
+            category String,
+
+            order_total Float64,
+            shipping_price Float64,
+            merchant_shipment_cost Float64,
+            order_status LowCardinality(String),
+
+            item_price Float64,
+            item_tax Float64,
+            quantity UInt32,
+
+            promotion_discount Float64,
+            ship_promotion_discount Float64,
+
+            product_cost Float64,
+            cogs Float64,
+            referral_fee Float64,
+            vendor_funding Float64,
+            vendor_discount Float64,
+
+            gross_revenue Float64,
+            net_item_revenue Float64,
+
+            currency LowCardinality(String)
+        )
+        ENGINE = MergeTree
+        PARTITION BY toYYYYMM(order_date)
+        ORDER BY (order_date_day, marketplace_id, product_id, order_id)
+        """
+
+        client.command(query)
+
+        return {
+            "success": True,
+            "message": "fact_order_items table created successfully",
+        }
+
+    except Exception as e:
+        return {"success": False, "error": str(e)}
