@@ -35,3 +35,4 @@ starkbank-ecdsa==2.2.0
 typing-extensions==4.12.2
 tzdata==2025.1
 emoji==2.12.1
+clickhouse-connect==1.1.1
