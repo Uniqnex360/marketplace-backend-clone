@@ -13,8 +13,22 @@ services:
       - DEBUG=1
       # - REDIS_HOST=redis
       # - REDIS_PASSWORD=foobaredUniqnex
-    # depends_on:
-    #   - redis
+    depends_on:
+      # - redis
+      - clickhouse
+  
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    env_file:
+      - .env
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+
+volumes:
+  clickhouse_data:
 
   # redis:
   #   image: redis:7
