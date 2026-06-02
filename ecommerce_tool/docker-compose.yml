@@ -13,6 +13,8 @@ services:
       - DEBUG=1
       # - REDIS_HOST=redis
       # - REDIS_PASSWORD=foobaredUniqnex
+    env_file:
+      - .env
     depends_on:
       # - redis
       - clickhouse
