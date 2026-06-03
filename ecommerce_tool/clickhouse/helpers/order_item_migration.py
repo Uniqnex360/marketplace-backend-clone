@@ -12,9 +12,9 @@ def migrate_mongo_order_item_to_clickhouse(request):
 
     t0 = time.time()
 
-    ORDER_BATCH = 500
-    ITEM_BATCH = 1000
-    INSERT_BATCH = 500
+    ORDER_BATCH = 250
+    ITEM_BATCH = 500
+    INSERT_BATCH = 250
 
     print("[START] Migration started...")
 
