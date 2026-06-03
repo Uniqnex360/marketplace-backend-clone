@@ -7,6 +7,7 @@ from clickhouse.helpers import (
     create_fact_order_items_table,
     drop_fact_order_items_table,
     truncate_fact_order_items_table,
+    all_market_place_data_clickhouse,
 )
 
 urlpatterns = [
@@ -24,6 +25,11 @@ urlpatterns = [
         "get_metrics_by_date_range_clickhouse/",
         get_metrics_by_date_range_clickhouse,
         name="get_metrics_by_date_range_clickhouse",
+    ),
+    path(
+        "all_market_place_data_clickhouse/",
+        all_market_place_data_clickhouse,
+        name="all_market_place_data_clickhouse",
     ),
     #create index urls
     path(

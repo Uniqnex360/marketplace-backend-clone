@@ -2,6 +2,7 @@ from datetime import timedelta, datetime
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework.parsers import JSONParser
 from clickhouse.config import client
+from omnisight.operations.helium_utils import get_date_range
 
 
 @csrf_exempt
@@ -21,6 +22,7 @@ def create_fact_order_items_table(request):
             order_date_day Date,
 
             marketplace_id String,
+            marketplace_name String,
             fulfillment_channel String,
             brand_id String,
             manufacturer_name String,
@@ -109,22 +111,36 @@ def get_metrics_by_date_range_clickhouse(request):
 
     json_request = JSONParser().parse(request)
 
-    country = json_request.get("country")
+    country = json_request.get("country", "US")
     brand_ids = json_request.get("brand_id", [])
+    preset = json_request.get("preset")
 
-    start_date = datetime.strptime(json_request.get("start_date"), "%d/%m/%Y").date()
-    end_date = datetime.strptime(json_request.get("end_date"), "%d/%m/%Y").date()
+    start_date_str = json_request.get("start_date")
+    end_date_str = json_request.get("end_date")
+
+    if start_date_str and end_date_str:
+        start_date = datetime.strptime(start_date_str, "%d/%m/%Y").date()
+        end_date = datetime.strptime(end_date_str, "%d/%m/%Y").date()
+    else:
+        start_date, end_date = get_date_range(preset)
 
     # -------------------------
-    # WHERE BUILDER
+    # ClickHouse SAFE DATE FORMAT
+    # -------------------------
+    def to_clickhouse_date(d):
+        return d.strftime("%Y-%m-%d")
+
+    # -------------------------
+    # WHERE BUILDER (SAFE)
     # -------------------------
     where_clauses = ["order_date_day BETWEEN {start:Date} AND {end:Date}"]
 
     params = {
-        "start": start_date,
-        "end": end_date,
+        "start": to_clickhouse_date(start_date),
+        "end": to_clickhouse_date(end_date),
     }
 
+    # IMPORTANT: only add if value exists and is meaningful
     if country:
         where_clauses.append("country = {country:String}")
         params["country"] = country
@@ -151,12 +167,14 @@ def get_metrics_by_date_range_clickhouse(request):
     graph_rows = client.query(graph_query, parameters=params).result_rows
 
     graph_data = {
-        r[0].strftime("%B %d, %Y").lower(): {"gross_revenue_with_tax": round(r[1], 2)}
+        r[0].strftime("%B %d, %Y").lower(): {
+            "gross_revenue_with_tax": round(r[1], 2)
+        }
         for r in graph_rows
     }
 
     # -------------------------
-    # METRICS QUERY (SAFE - ONLY RAW SUMS)
+    # METRICS QUERY
     # -------------------------
     metrics_query = f"""
         SELECT
@@ -179,9 +197,23 @@ def get_metrics_by_date_range_clickhouse(request):
 
     target = client.query(metrics_query, parameters=params).result_rows[0]
 
-    previous_params = dict(params)
-    previous_params["start"] = start_date - timedelta(days=1)
-    previous_params["end"] = end_date - timedelta(days=1)
+    # -------------------------
+    # PREVIOUS PERIOD (SAFE)
+    # -------------------------
+    previous_start = start_date - timedelta(days=1)
+    previous_end = end_date - timedelta(days=1)
+
+    previous_params = {
+        "start": to_clickhouse_date(previous_start),
+        "end": to_clickhouse_date(previous_end),
+    }
+
+    # IMPORTANT: keep same filters consistent
+    if country:
+        previous_params["country"] = country
+
+    if brand_ids:
+        previous_params["brand_ids"] = brand_ids
 
     previous = client.query(metrics_query, parameters=previous_params).result_rows[0]
 

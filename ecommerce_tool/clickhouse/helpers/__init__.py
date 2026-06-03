@@ -5,3 +5,4 @@ from .metrics import (
     truncate_fact_order_items_table,
 )
 from .order_item_migration import migrate_mongo_order_item_to_clickhouse
+from .all_market_place import all_market_place_data_clickhouse

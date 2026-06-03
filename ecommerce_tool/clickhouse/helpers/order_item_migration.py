@@ -2,7 +2,7 @@ from bson import ObjectId
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from clickhouse.config import client
-from omnisight.models import Order, OrderItems, Product
+from omnisight.models import Order, OrderItems, Product, Marketplace
 from datetime import datetime
 import time
 
@@ -12,15 +12,24 @@ def migrate_mongo_order_item_to_clickhouse(request):
 
     t0 = time.time()
 
-    ORDER_BATCH = 50  # 🔥 reduced for 1GB RAM safety
-    ITEM_BATCH = 50  # 🔥 reduced
-    INSERT_BATCH = 20  # 🔥 VERY IMPORTANT for stability
+    ORDER_BATCH = 250
+    INSERT_BATCH = 100
 
     print("[START] Migration started...")
 
     def chunked(lst, size):
         for i in range(0, len(lst), size):
             yield lst[i : i + size]
+
+    # -----------------------------
+    # 🔥 PRELOAD MARKETPLACE MAP (NEW)
+    # -----------------------------
+    marketplace_map = {
+        str(m["_id"]): m.get("name", "")
+        for m in Marketplace._get_collection().find({}, {"_id": 1, "name": 1})
+    }
+
+    print(f"[INFO] Marketplace cache loaded: {len(marketplace_map)}")
 
     def flush(buffer, batch_no):
         if not buffer:
@@ -39,6 +48,7 @@ def migrate_mongo_order_item_to_clickhouse(request):
                 "order_total",
                 "currency",
                 "marketplace_id",
+                "marketplace_name",  # 🔥 NEW COLUMN
                 "country",
                 "channel",
                 "fulfillment_channel",
@@ -54,7 +64,7 @@ def migrate_mongo_order_item_to_clickhouse(request):
                 "gross_revenue",
             ],
             settings={
-                "max_memory_usage": 300_000_000,  # 🔥 lower cap for 1GB RAM server
+                "max_memory_usage": 300_000_000,
                 "max_block_size": 500,
                 "async_insert": 1,
                 "wait_for_async_insert": 1,
@@ -64,7 +74,6 @@ def migrate_mongo_order_item_to_clickhouse(request):
         print(f"[FLUSH] batch={batch_no} rows={len(buffer)}")
 
     def get_product(product_id):
-        """🔥 STREAM lookup instead of product_map (CRITICAL FIX)"""
         if not product_id:
             return {}
 
@@ -92,11 +101,7 @@ def migrate_mongo_order_item_to_clickhouse(request):
 
         return OrderItems._get_collection().find_one(
             {"_id": item_id},
-            {
-                "_id": 1,
-                "Pricing": 1,
-                "ProductDetails": 1,
-            },
+            {"_id": 1, "Pricing": 1, "ProductDetails": 1},
         )
 
     order_cursor = (
@@ -132,6 +137,10 @@ def migrate_mongo_order_item_to_clickhouse(request):
         order_id = str(order["_id"])
         purchase_order_id = str(order.get("purchase_order_id") or "")
         marketplace_id = str(order.get("marketplace_id") or "")
+
+        # 🔥 NEW: marketplace name lookup (FAST dict lookup)
+        marketplace_name = marketplace_map.get(marketplace_id, "")
+
         country = order.get("geo") or ""
         channel = order.get("channel") or ""
         fulfillment_channel = order.get("fulfillment_channel") or ""
@@ -182,6 +191,7 @@ def migrate_mongo_order_item_to_clickhouse(request):
                     order_total,
                     currency,
                     marketplace_id,
+                    marketplace_name,  # 🔥 NEW VALUE
                     country,
                     channel,
                     fulfillment_channel,
@@ -200,19 +210,15 @@ def migrate_mongo_order_item_to_clickhouse(request):
 
             rows += 1
 
-            # 🔥 ultra-safe flush
             if len(insert_buffer) >= INSERT_BATCH:
                 flush(insert_buffer, batch_no)
                 insert_buffer.clear()
                 batch_no += 1
 
-        # 🔥 hard memory safety point
         if orders_count % ORDER_BATCH == 0:
             print(f"[PROGRESS] orders={orders_count} rows={rows}")
 
-    # final flush
     flush(insert_buffer, batch_no)
-    insert_buffer.clear()
 
     print("===================================")
     print("[DONE] MIGRATION FINISHED")
