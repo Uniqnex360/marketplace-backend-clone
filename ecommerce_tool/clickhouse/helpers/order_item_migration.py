@@ -12,9 +12,10 @@ def migrate_mongo_order_item_to_clickhouse(request):
 
     t0 = time.time()
 
-    ORDER_BATCH = 250
-    ITEM_BATCH = 500
-    INSERT_BATCH = 250
+    # 🔥 reduced batch sizes to avoid MEMORY_LIMIT_EXCEEDED
+    ORDER_BATCH = 100  # was 250
+    ITEM_BATCH = 100  # was 500
+    INSERT_BATCH = 50  # was 250
 
     print("[START] Migration started...")
 
@@ -53,6 +54,14 @@ def migrate_mongo_order_item_to_clickhouse(request):
                 "referral_fee",
                 "gross_revenue",
             ],
+            settings={
+                # 🔥 IMPORTANT: prevents ClickHouse internal memory spikes
+                "max_memory_usage": 500_000_000,
+                "max_block_size": 1000,
+                "max_insert_block_size": 1000,
+                "async_insert": 1,
+                "wait_for_async_insert": 1,
+            },
         )
 
         print(f"[FLUSH] batch={batch_no} rows={len(buffer)}")
@@ -64,6 +73,7 @@ def migrate_mongo_order_item_to_clickhouse(request):
         product_ids = set()
 
         for chunk in chunked(list(item_ids), ITEM_BATCH):
+
             cursor = OrderItems._get_collection().find(
                 {"_id": {"$in": chunk}},
                 {
@@ -86,6 +96,7 @@ def migrate_mongo_order_item_to_clickhouse(request):
         product_map = {}
 
         for chunk in chunked(list(product_ids), ITEM_BATCH):
+
             cursor = Product._get_collection().find(
                 {"_id": {"$in": chunk}},
                 {
@@ -105,7 +116,7 @@ def migrate_mongo_order_item_to_clickhouse(request):
 
         return item_map, product_map
 
-    # IMPORTANT: raw mongo (fast + no mongoengine lazy loading issues)
+    # Mongo cursor
     order_cursor = (
         Order._get_collection()
         .find(
@@ -141,23 +152,21 @@ def migrate_mongo_order_item_to_clickhouse(request):
         order_buffer.append(order)
         orders_count += 1
 
-        # collect item ids
         for iid in order.get("order_items", []):
             item_ids.add(iid if isinstance(iid, ObjectId) else ObjectId(iid))
 
-        # process batch
+        # 🔥 process batch
         if len(order_buffer) >= ORDER_BATCH:
 
             print(f"[BATCH] orders={len(order_buffer)} items={len(item_ids)}")
 
             item_map, product_map = process_items(item_ids)
-
             item_ids = set()
 
             for o in order_buffer:
 
                 order_id = str(o["_id"])
-                purchase_order_id = str(o["purchase_order_id"] or "")
+                purchase_order_id = str(o.get("purchase_order_id") or "")
                 marketplace_id = str(o.get("marketplace_id") or "")
                 country = o.get("geo") or ""
                 channel = o.get("channel") or ""
@@ -165,6 +174,14 @@ def migrate_mongo_order_item_to_clickhouse(request):
                 order_status = o.get("order_status") or ""
                 order_total = o.get("order_total")
                 currency = o.get("currency")
+
+                order_date = o.get("order_date")
+                order_date_day = None
+
+                if order_date:
+                    if isinstance(order_date, str):
+                        order_date = datetime.fromisoformat(order_date)
+                    order_date_day = order_date.date()
 
                 for iid in o.get("order_items", []):
 
@@ -186,21 +203,13 @@ def migrate_mongo_order_item_to_clickhouse(request):
                     )
 
                     product_id = item.get("ProductDetails", {}).get("product_id")
-                    product = product_map.get(str(product_id if product_id else ""), {})
-                    brand_id = str(product.get("brand_id") or "")
+                    product = product_map.get(str(product_id or "")) or {}
 
+                    brand_id = str(product.get("brand_id") or "")
                     product_cost = float(product.get("product_cost", 0) or 0)
                     referral_fee = float(product.get("referral_fee", 0) or 0)
                     sku = product.get("sku", "")
                     category = product.get("category", "")
-
-                    order_date = o.get("order_date")
-
-                    order_date_day = None
-                    if order_date:
-                        if isinstance(order_date, str):
-                            order_date = datetime.fromisoformat(order_date)
-                        order_date_day = order_date.date()
 
                     insert_buffer.append(
                         (
@@ -231,9 +240,10 @@ def migrate_mongo_order_item_to_clickhouse(request):
 
                     rows += 1
 
+                    # 🔥 safer flush (lower threshold)
                     if len(insert_buffer) >= INSERT_BATCH:
                         flush(insert_buffer, batch_no)
-                        insert_buffer = []
+                        del insert_buffer[:]  # IMPORTANT: prevents memory spike
                         batch_no += 1
 
             print(f"[PROGRESS] orders={orders_count} rows={rows}")
@@ -242,6 +252,7 @@ def migrate_mongo_order_item_to_clickhouse(request):
 
     # final flush
     flush(insert_buffer, batch_no)
+    del insert_buffer[:]
 
     print("===================================")
     print("[DONE] MIGRATION FINISHED")
