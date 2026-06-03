@@ -12,10 +12,9 @@ def migrate_mongo_order_item_to_clickhouse(request):
 
     t0 = time.time()
 
-    # 🔥 reduced batch sizes to avoid MEMORY_LIMIT_EXCEEDED
-    ORDER_BATCH = 100  # was 250
-    ITEM_BATCH = 100  # was 500
-    INSERT_BATCH = 50  # was 250
+    ORDER_BATCH = 50  # 🔥 reduced for 1GB RAM safety
+    ITEM_BATCH = 50  # 🔥 reduced
+    INSERT_BATCH = 20  # 🔥 VERY IMPORTANT for stability
 
     print("[START] Migration started...")
 
@@ -55,10 +54,8 @@ def migrate_mongo_order_item_to_clickhouse(request):
                 "gross_revenue",
             ],
             settings={
-                # 🔥 IMPORTANT: prevents ClickHouse internal memory spikes
-                "max_memory_usage": 500_000_000,
-                "max_block_size": 1000,
-                "max_insert_block_size": 1000,
+                "max_memory_usage": 300_000_000,  # 🔥 lower cap for 1GB RAM server
+                "max_block_size": 500,
                 "async_insert": 1,
                 "wait_for_async_insert": 1,
             },
@@ -66,39 +63,17 @@ def migrate_mongo_order_item_to_clickhouse(request):
 
         print(f"[FLUSH] batch={batch_no} rows={len(buffer)}")
 
-    def process_items(item_ids):
-        print(f"[STEP] Fetching OrderItems: {len(item_ids)}")
+    def get_product(product_id):
+        """🔥 STREAM lookup instead of product_map (CRITICAL FIX)"""
+        if not product_id:
+            return {}
 
-        item_map = {}
-        product_ids = set()
+        if isinstance(product_id, str):
+            product_id = ObjectId(product_id)
 
-        for chunk in chunked(list(item_ids), ITEM_BATCH):
-
-            cursor = OrderItems._get_collection().find(
-                {"_id": {"$in": chunk}},
-                {
-                    "_id": 1,
-                    "Pricing": 1,
-                    "ProductDetails": 1,
-                },
-            )
-
-            for item in cursor:
-                item_id = str(item["_id"])
-                item_map[item_id] = item
-
-                pid = item.get("ProductDetails", {}).get("product_id")
-                if pid:
-                    product_ids.add(pid if isinstance(pid, ObjectId) else ObjectId(pid))
-
-        print(f"[INFO] OrderItems loaded={len(item_map)} products={len(product_ids)}")
-
-        product_map = {}
-
-        for chunk in chunked(list(product_ids), ITEM_BATCH):
-
-            cursor = Product._get_collection().find(
-                {"_id": {"$in": chunk}},
+        return (
+            Product._get_collection().find_one(
+                {"_id": product_id},
                 {
                     "_id": 1,
                     "product_cost": 1,
@@ -108,15 +83,22 @@ def migrate_mongo_order_item_to_clickhouse(request):
                     "category": 1,
                 },
             )
+            or {}
+        )
 
-            for p in cursor:
-                product_map[str(p["_id"])] = p
+    def get_item(item_id):
+        if isinstance(item_id, str):
+            item_id = ObjectId(item_id)
 
-        print(f"[INFO] Products loaded={len(product_map)}")
+        return OrderItems._get_collection().find_one(
+            {"_id": item_id},
+            {
+                "_id": 1,
+                "Pricing": 1,
+                "ProductDetails": 1,
+            },
+        )
 
-        return item_map, product_map
-
-    # Mongo cursor
     order_cursor = (
         Order._get_collection()
         .find(
@@ -139,120 +121,98 @@ def migrate_mongo_order_item_to_clickhouse(request):
     )
 
     insert_buffer = []
-    item_ids = set()
-
     batch_no = 1
     rows = 0
     orders_count = 0
 
-    order_buffer = []
-
     for order in order_cursor:
 
-        order_buffer.append(order)
         orders_count += 1
 
+        order_id = str(order["_id"])
+        purchase_order_id = str(order.get("purchase_order_id") or "")
+        marketplace_id = str(order.get("marketplace_id") or "")
+        country = order.get("geo") or ""
+        channel = order.get("channel") or ""
+        fulfillment_channel = order.get("fulfillment_channel") or ""
+        order_status = order.get("order_status") or ""
+        order_total = order.get("order_total")
+        currency = order.get("currency")
+
+        order_date = order.get("order_date")
+        order_date_day = None
+
+        if order_date:
+            if isinstance(order_date, str):
+                order_date = datetime.fromisoformat(order_date)
+            order_date_day = order_date.date()
+
         for iid in order.get("order_items", []):
-            item_ids.add(iid if isinstance(iid, ObjectId) else ObjectId(iid))
 
-        # 🔥 process batch
-        if len(order_buffer) >= ORDER_BATCH:
+            item = get_item(iid)
+            if not item:
+                continue
 
-            print(f"[BATCH] orders={len(order_buffer)} items={len(item_ids)}")
+            pricing = item.get("Pricing", {})
 
-            item_map, product_map = process_items(item_ids)
-            item_ids = set()
+            item_price = float(pricing.get("ItemPrice", {}).get("Amount", 0) or 0)
+            item_tax = float(pricing.get("ItemTax", {}).get("Amount", 0) or 0)
 
-            for o in order_buffer:
+            quantity = int(
+                item.get("ProductDetails", {}).get("QuantityOrdered", 1) or 1
+            )
 
-                order_id = str(o["_id"])
-                purchase_order_id = str(o.get("purchase_order_id") or "")
-                marketplace_id = str(o.get("marketplace_id") or "")
-                country = o.get("geo") or ""
-                channel = o.get("channel") or ""
-                fulfillment_channel = o.get("fulfillment_channel") or ""
-                order_status = o.get("order_status") or ""
-                order_total = o.get("order_total")
-                currency = o.get("currency")
+            product_id = item.get("ProductDetails", {}).get("product_id")
+            product = get_product(product_id)
 
-                order_date = o.get("order_date")
-                order_date_day = None
+            brand_id = str(product.get("brand_id") or "")
+            product_cost = float(product.get("product_cost", 0) or 0)
+            referral_fee = float(product.get("referral_fee", 0) or 0)
+            sku = product.get("sku", "")
+            category = product.get("category", "")
 
-                if order_date:
-                    if isinstance(order_date, str):
-                        order_date = datetime.fromisoformat(order_date)
-                    order_date_day = order_date.date()
+            insert_buffer.append(
+                (
+                    order_id,
+                    str(iid),
+                    purchase_order_id,
+                    order.get("order_date"),
+                    order_date_day,
+                    order_status,
+                    order_total,
+                    currency,
+                    marketplace_id,
+                    country,
+                    channel,
+                    fulfillment_channel,
+                    brand_id,
+                    item_price,
+                    item_tax,
+                    quantity,
+                    sku,
+                    category,
+                    product_cost,
+                    product_cost * quantity,
+                    referral_fee,
+                    item_price * quantity,
+                )
+            )
 
-                for iid in o.get("order_items", []):
+            rows += 1
 
-                    iid = str(iid)
-                    item = item_map.get(iid)
+            # 🔥 ultra-safe flush
+            if len(insert_buffer) >= INSERT_BATCH:
+                flush(insert_buffer, batch_no)
+                insert_buffer.clear()
+                batch_no += 1
 
-                    if not item:
-                        continue
-
-                    pricing = item.get("Pricing", {})
-
-                    item_price = float(
-                        pricing.get("ItemPrice", {}).get("Amount", 0) or 0
-                    )
-                    item_tax = float(pricing.get("ItemTax", {}).get("Amount", 0) or 0)
-
-                    quantity = int(
-                        item.get("ProductDetails", {}).get("QuantityOrdered", 1) or 1
-                    )
-
-                    product_id = item.get("ProductDetails", {}).get("product_id")
-                    product = product_map.get(str(product_id or "")) or {}
-
-                    brand_id = str(product.get("brand_id") or "")
-                    product_cost = float(product.get("product_cost", 0) or 0)
-                    referral_fee = float(product.get("referral_fee", 0) or 0)
-                    sku = product.get("sku", "")
-                    category = product.get("category", "")
-
-                    insert_buffer.append(
-                        (
-                            order_id,
-                            iid,
-                            purchase_order_id,
-                            o.get("order_date"),
-                            order_date_day,
-                            order_status,
-                            order_total,
-                            currency,
-                            marketplace_id,
-                            country,
-                            channel,
-                            fulfillment_channel,
-                            brand_id,
-                            item_price,
-                            item_tax,
-                            quantity,
-                            sku,
-                            category,
-                            product_cost,
-                            product_cost * quantity,
-                            referral_fee,
-                            item_price * quantity,
-                        )
-                    )
-
-                    rows += 1
-
-                    # 🔥 safer flush (lower threshold)
-                    if len(insert_buffer) >= INSERT_BATCH:
-                        flush(insert_buffer, batch_no)
-                        del insert_buffer[:]  # IMPORTANT: prevents memory spike
-                        batch_no += 1
-
+        # 🔥 hard memory safety point
+        if orders_count % ORDER_BATCH == 0:
             print(f"[PROGRESS] orders={orders_count} rows={rows}")
-
-            order_buffer = []
 
     # final flush
     flush(insert_buffer, batch_no)
-    del insert_buffer[:]
+    insert_buffer.clear()
 
     print("===================================")
     print("[DONE] MIGRATION FINISHED")
