@@ -32,17 +32,27 @@ def migrate_mongo_order_item_to_clickhouse(request):
             column_names=[
                 "order_id",
                 "order_item_id",
+                "purchase_order_id",
                 "order_date",
                 "order_date_day",
+                "order_status",
+                "order_total",
+                "currency",
                 "marketplace_id",
+                "country",
+                "channel",
+                "fulfillment_channel",
+                "brand_id",
                 "item_price",
                 "item_tax",
                 "quantity",
+                "sku",
+                "category",
                 "product_cost",
                 "cogs",
                 "referral_fee",
-                "gross_revenue"
-            ]
+                "gross_revenue",
+            ],
         )
 
         print(f"[FLUSH] batch={batch_no} rows={len(buffer)}")
@@ -78,7 +88,14 @@ def migrate_mongo_order_item_to_clickhouse(request):
         for chunk in chunked(list(product_ids), ITEM_BATCH):
             cursor = Product._get_collection().find(
                 {"_id": {"$in": chunk}},
-                {"_id": 1, "product_cost": 1, "referral_fee": 1},
+                {
+                    "_id": 1,
+                    "product_cost": 1,
+                    "referral_fee": 1,
+                    "brand_id": 1,
+                    "sku": 1,
+                    "category": 1,
+                },
             )
 
             for p in cursor:
@@ -91,7 +108,22 @@ def migrate_mongo_order_item_to_clickhouse(request):
     # IMPORTANT: raw mongo (fast + no mongoengine lazy loading issues)
     order_cursor = (
         Order._get_collection()
-        .find({}, {"_id": 1, "order_items": 1, "order_date": 1, "marketplace_id": 1})
+        .find(
+            {},
+            {
+                "_id": 1,
+                "order_items": 1,
+                "order_date": 1,
+                "purchase_order_id": 1,
+                "marketplace_id": 1,
+                "geo": 1,
+                "channel": 1,
+                "fulfillment_channel": 1,
+                "order_status": 1,
+                "order_total": 1,
+                "currency": 1,
+            },
+        )
         .batch_size(ORDER_BATCH)
     )
 
@@ -125,7 +157,14 @@ def migrate_mongo_order_item_to_clickhouse(request):
             for o in order_buffer:
 
                 order_id = str(o["_id"])
+                purchase_order_id = str(o["purchase_order_id"] or "")
                 marketplace_id = str(o.get("marketplace_id") or "")
+                country = o.get("geo") or ""
+                channel = o.get("channel") or ""
+                fulfillment_channel = o.get("fulfillment_channel") or ""
+                order_status = o.get("order_status") or ""
+                order_total = o.get("order_total")
+                currency = o.get("currency")
 
                 for iid in o.get("order_items", []):
 
@@ -147,10 +186,13 @@ def migrate_mongo_order_item_to_clickhouse(request):
                     )
 
                     product_id = item.get("ProductDetails", {}).get("product_id")
-                    product = product_map.get(str(product_id), {})
+                    product = product_map.get(str(product_id if product_id else ""), {})
+                    brand_id = str(product.get("brand_id") or "")
 
                     product_cost = float(product.get("product_cost", 0) or 0)
                     referral_fee = float(product.get("referral_fee", 0) or 0)
+                    sku = product.get("sku", "")
+                    category = product.get("category", "")
 
                     order_date = o.get("order_date")
 
@@ -164,16 +206,26 @@ def migrate_mongo_order_item_to_clickhouse(request):
                         (
                             order_id,
                             iid,
+                            purchase_order_id,
                             o.get("order_date"),
-                            order_date_day, 
+                            order_date_day,
+                            order_status,
+                            order_total,
+                            currency,
                             marketplace_id,
+                            country,
+                            channel,
+                            fulfillment_channel,
+                            brand_id,
                             item_price,
                             item_tax,
                             quantity,
+                            sku,
+                            category,
                             product_cost,
                             product_cost * quantity,
                             referral_fee,
-                            item_price,
+                            item_price * quantity,
                         )
                     )
 

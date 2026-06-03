@@ -5,6 +5,8 @@ from clickhouse.helpers import (
     migrate_mongo_order_item_to_clickhouse,
     get_metrics_by_date_range_clickhouse,
     create_fact_order_items_table,
+    drop_fact_order_items_table,
+    truncate_fact_order_items_table,
 )
 
 urlpatterns = [
@@ -28,5 +30,17 @@ urlpatterns = [
         "create_fact_order_items_table/",
         create_fact_order_items_table,
         name="create_fact_order_items_table",
+    ),
+    # delete tables
+    path(
+        "drop_fact_order_items_table/",
+        drop_fact_order_items_table,
+        name="drop_fact_order_items_table",
+    ),
+    #trucate tables
+    path(
+        "truncate_fact_order_items_table/",
+        truncate_fact_order_items_table,
+        name="truncate_fact_order_items_table",
     ),
 ]
