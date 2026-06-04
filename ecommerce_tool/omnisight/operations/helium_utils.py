@@ -143,6 +143,8 @@ def getproductIdListBasedonManufacture(manufactureName = [],start_date=None, end
     if products != []:
         orders = getOrdersListBasedonProductId(products[0]['productIds'],start_date, end_date)
     return orders
+
+
 def get_date_range(preset, time_zone_str="UTC"):
     tz = timezone(time_zone_str)
     now = datetime.now(tz)
@@ -1146,6 +1148,8 @@ def calculate_metricss(
             "shipping_cost": round(shipping_cost, 2),
         })
     return base_result
+
+
 def totalRevenueCalculationForProduct(start_date, end_date, marketplace_id=None, brand_id=None, product_id=None, manufacturer_name=None, fulfillment_channel=None,timezone_str="UTC"):
     total = dict()
     gross_revenue = 0

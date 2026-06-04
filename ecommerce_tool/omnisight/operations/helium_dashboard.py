@@ -1823,19 +1823,346 @@ def clean_json_floats(obj):
         return [clean_json_floats(i) for i in obj]
     return obj
 
+# @csrf_exempt
+# # @redis_cache(timeout=900,key_prefix='getPeriodWiseData')
+# def getPeriodWiseData(request):
+#     def to_utc_format(dt):
+#         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+#     json_request = JSONParser().parse(request)
+#     marketplace_id = json_request.get('marketplace_id', None)
+#     brand_id = json_request.get('brand_id', [])
+#     product_id = json_request.get('product_id', [])
+#     manufacturer_name = json_request.get('manufacturer_name', [])
+#     fulfillment_channel = json_request.get('fulfillment_channel', None)
+#     timezone_str = 'US/Pacific'
+#     # cache_key_prefix = 'period_wise_data_' + json.dumps(json_request, sort_keys=True)
+#     periods = {
+#         "yesterday": get_date_range("Yesterday", timezone_str),
+#         "last7Days": get_date_range("Last 7 days", timezone_str),
+#         "last30Days": get_date_range("Last 30 days", timezone_str),
+#         "yearToDate": get_date_range("This Year", timezone_str),
+#         "lastYear": get_date_range("Last Year", timezone_str)
+#     }
+#     ordered_keys = ["yesterday", "last7Days", "last30Days", "yearToDate"]
+#     ordered_response=OrderedDict()
+#     def get_previous_range(current_start, current_end):
+#         duration = current_end - current_start
+#         return current_start - duration, current_end - duration
+#     period_jobs = {}
+#     for key in ["yesterday", "last7Days", "last30Days", "yearToDate"]:
+#         cur_start, cur_end = periods[key]
+#         if key == "yearToDate":
+#             duration = cur_end - cur_start
+#             prev_start = periods["lastYear"][0]
+#             prev_end = prev_start + duration
+#         else:
+#             prev_start, prev_end = get_previous_range(cur_start, cur_end)
+#         period_jobs[key] = {
+#             "label": key.replace("last", "Last ").title().replace("Yest", "Yest"),
+#             "current_start": cur_start,
+#             "current_end": cur_end,
+#             "previous_start": prev_start,
+#             "previous_end": prev_end
+#         }
+#     response_data = {}
+#     # for key in ["last7Days", "last30Days", "yearToDate"]:
+#     #     cache_key = f"{cache_key_prefix}_{key}"
+#     #     cached_data = cache.get(cache_key)
+#     #     if cached_data:
+#     #         response_data[key] = cached_data
+#     with ThreadPoolExecutor(max_workers=8) as executor:
+#         futures = {}
+#         futures["yesterday_current"] = executor.submit(
+#             calculate_metricss,
+#             period_jobs["yesterday"]["current_start"], period_jobs["yesterday"]["current_end"],
+#             marketplace_id, brand_id, product_id, manufacturer_name,
+#             fulfillment_channel, timezone_str, False, True
+#         )
+#         futures["yesterday_previous"] = executor.submit(
+#             calculate_metricss,
+#             period_jobs["yesterday"]["previous_start"], period_jobs["yesterday"]["previous_end"],
+#             marketplace_id, brand_id, product_id, manufacturer_name,
+#             fulfillment_channel, timezone_str, False, True
+#         )
+#         results = {key: f.result() for key, f in futures.items()}
+#     output = {
+#         "label": period_jobs["yesterday"]["label"],
+#         "period": {
+#             "current": {
+#                 "from": to_utc_format(period_jobs["yesterday"]["current_start"]),
+#                 "to": to_utc_format(period_jobs["yesterday"]["current_end"])
+#             },
+#             "previous": {
+#                 "from": to_utc_format(period_jobs["yesterday"]["previous_start"]),
+#                 "to": to_utc_format(period_jobs["yesterday"]["previous_end"])
+#             }
+#         }
+#     }
+#     current_metrics = results["yesterday_current"]
+#     previous_metrics = results["yesterday_previous"]
+#     for metric in current_metrics:
+#         output[metric] = {
+#             "current": current_metrics[metric],
+#             "previous": previous_metrics.get(metric, 0)
+#         }
+#     response_data["yesterday"] = output
+#     for key in ["last7Days", "last30Days", "yearToDate"]:
+#         if key not in response_data:
+#             current = calculate_metricss(
+#                 period_jobs[key]["current_start"], period_jobs[key]["current_end"],
+#                 marketplace_id, brand_id, product_id, manufacturer_name,
+#                 fulfillment_channel, timezone_str, False, True
+#             )
+#             previous = calculate_metricss(
+#                 period_jobs[key]["previous_start"], period_jobs[key]["previous_end"],
+#                 marketplace_id, brand_id, product_id, manufacturer_name,
+#                 fulfillment_channel, timezone_str, False, True
+#             )
+#             data = {
+#                 "label": period_jobs[key]["label"],
+#                 "period": {
+#                     "current": {
+#                         "from": to_utc_format(period_jobs[key]["current_start"]),
+#                         "to": to_utc_format(period_jobs[key]["current_end"])
+#                     },
+#                     "previous": {
+#                         "from": to_utc_format(period_jobs[key]["previous_start"]),
+#                         "to": to_utc_format(period_jobs[key]["previous_end"])
+#                     }
+#                 }
+#             }
+#             for metric in current:
+#                 data[metric] = {
+#                     "current": current[metric],
+#                     "previous": previous.get(metric, 0)
+#                 }
+#             response_data[key] = data
+#     for key in ordered_keys:
+#         if key in response_data:
+#             ordered_response[key]=response_data[key]
+#     return JsonResponse(ordered_response, safe=False)
+
+
+import time
+import math
+from collections import OrderedDict
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from rest_framework.parsers import JSONParser
+
+
+# -----------------------------
+# MONGO (DEBUG ENABLED)
+# -----------------------------
+def fetch_sessions_pageviews(from_date, to_date, product_ids):
+
+    start = time.time()
+
+    print("\n[MONGO] ===============================")
+    print("[MONGO] from_date:", from_date)
+    print("[MONGO] to_date:", to_date)
+    print("[MONGO] product_ids:", product_ids)
+
+    if not product_ids:
+        print("[MONGO] EMPTY product_ids → returning 0")
+        return {"page_views": 0, "sessions": 0}
+
+    pipeline = [
+        {
+            "$match": {
+                "product_id": {"$in": list(product_ids)},
+                "date": {"$gte": from_date, "$lte": to_date}
+            }
+        },
+        {
+            "$group": {
+                "_id": None,
+                "page_views": {"$sum": "$page_views"},
+                "sessions": {"$sum": "$sessions"}
+            }
+        }
+    ]
+
+    print("[MONGO] pipeline:", pipeline)
+
+    result = list(
+        pageview_session_count.objects.aggregate(pipeline, allowDiskUse=True)
+    )
+
+    print("[MONGO] raw result:", result)
+
+    if not result:
+        print("[MONGO] NO RESULT FOUND")
+        return {"page_views": 0, "sessions": 0}
+
+    out = {
+        "page_views": result[0].get("page_views", 0),
+        "sessions": result[0].get("sessions", 0)
+    }
+
+    print(f"[MONGO] FINAL OUT: {out}")
+    print(f"[MONGO] took {time.time() - start:.4f}s")
+
+    return out
+
+
+# -----------------------------
+# CLICKHOUSE (DEBUG ENABLED)
+# -----------------------------
+def fetch_clickhouse_metrics(from_date, to_date, marketplace_id,
+                             brand_id, product_id,
+                             manufacturer_name, fulfillment_channel):
+
+    start = time.time()
+
+    print("\n[CLICKHOUSE] ===============================")
+    print("[CLICKHOUSE] from_date:", from_date)
+    print("[CLICKHOUSE] to_date:", to_date)
+    print("[CLICKHOUSE] marketplace_id:", marketplace_id)
+    print("[CLICKHOUSE] brand_id:", brand_id)
+    print("[CLICKHOUSE] product_id:", product_id)
+    print("[CLICKHOUSE] manufacturer_name:", manufacturer_name)
+    print("[CLICKHOUSE] fulfillment_channel:", fulfillment_channel)
+
+    where = [
+        f"order_date >= toDateTime('{from_date}')",
+        f"order_date <= toDateTime('{to_date}')"
+    ]
+
+    if marketplace_id and marketplace_id != "all":
+        where.append(f"marketplace_id = '{marketplace_id}'")
+
+    if brand_id:
+        where.append("brand_id IN (" + ", ".join("'" + str(x) + "'" for x in brand_id) + ")")
+
+    if product_id:
+        where.append("product_id IN (" + ", ".join("'" + str(x) + "'" for x in product_id) + ")")
+
+    if manufacturer_name:
+        where.append("manufacturer_name IN (" + ", ".join("'" + str(x) + "'" for x in manufacturer_name) + ")")
+
+    if fulfillment_channel:
+        where.append(f"fulfillment_channel = '{fulfillment_channel}'")
+
+    where_clause = " AND ".join(where)
+
+    query = f"""
+    SELECT
+        sum(gross_revenue),
+        sum(net_item_revenue),
+        sum(quantity),
+        countDistinct(order_id),
+
+        sum(cogs),
+        sum(referral_fee),
+        sum(vendor_funding),
+        sum(vendor_discount),
+        sum(promotion_discount),
+        sum(ship_promotion_discount),
+        sum(shipping_price)
+    FROM fact_order_items
+    WHERE {where_clause}
+    """
+
+    print("\n[CLICKHOUSE] FINAL QUERY:\n", query)
+
+    try:
+        row = client.query(query).result_rows
+        print("[CLICKHOUSE] RAW ROWS:", row)
+
+        if not row or not row[0]:
+            print("[CLICKHOUSE] EMPTY RESULT → returning zeros")
+            return {}
+
+        row = row[0]
+
+    except Exception as e:
+        print("[CLICKHOUSE] QUERY ERROR:", str(e))
+        return {}
+
+    (
+        gross_revenue,
+        net_item_revenue,
+        units_sold,
+        orders,
+        total_cogs,
+        referral_fee,
+        vendor_funding,
+        vendor_discount,
+        promotion_discount,
+        ship_promotion_discount,
+        shipping_cost
+    ) = row
+
+    print("[CLICKHOUSE] RAW VALUES:", row)
+
+    gross_revenue = gross_revenue or 0
+    net_item_revenue = net_item_revenue or 0
+    total_cogs = total_cogs or 0
+    referral_fee = referral_fee or 0
+    vendor_discount = vendor_discount or 0
+    ship_promotion_discount = ship_promotion_discount or 0
+    shipping_cost = shipping_cost or 0
+    promotion_discount = promotion_discount or 0
+    vendor_funding = vendor_funding or 0
+
+    expenses = total_cogs + referral_fee
+
+    net_profit = (
+        net_item_revenue
+        + shipping_cost
+        + promotion_discount
+        + vendor_funding
+        - (referral_fee + total_cogs + vendor_discount + ship_promotion_discount)
+    )
+
+    margin = (net_profit / gross_revenue) * 100 if gross_revenue else 0
+
+    result = {
+        "grossRevenue": round(gross_revenue, 2),
+        "expenses": round(expenses, 2),
+        "referral_fee": round(referral_fee, 2),
+        "netProfit": round(net_profit, 2),
+        "roi": round((net_profit / expenses) * 100, 2) if expenses else 0,
+        "unitsSold": int(units_sold or 0),
+        "orders": int(orders or 0),
+        "margin": round(margin, 2)
+    }
+
+    print("[CLICKHOUSE] FINAL RESULT:", result)
+    print(f"[CLICKHOUSE] took {time.time() - start:.4f}s")
+
+    return result
+
+
+# -----------------------------
+# MAIN API
+# -----------------------------
 @csrf_exempt
-# @redis_cache(timeout=900,key_prefix='getPeriodWiseData')
 def getPeriodWiseData(request):
-    def to_utc_format(dt):
-        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    api_start = time.time()
+    print("\n================ API START ================\n")
+
     json_request = JSONParser().parse(request)
-    marketplace_id = json_request.get('marketplace_id', None)
+
+    print("[API] REQUEST BODY:", json_request)
+
+    marketplace_id = json_request.get('marketplace_id')
     brand_id = json_request.get('brand_id', [])
     product_id = json_request.get('product_id', [])
     manufacturer_name = json_request.get('manufacturer_name', [])
-    fulfillment_channel = json_request.get('fulfillment_channel', None)
+    fulfillment_channel = json_request.get('fulfillment_channel')
+
+    print("[API] Filters:")
+    print(" marketplace_id:", marketplace_id)
+    print(" brand_id:", brand_id)
+    print(" product_id:", product_id)
+    print(" manufacturer_name:", manufacturer_name)
+    print(" fulfillment_channel:", fulfillment_channel)
+
     timezone_str = 'US/Pacific'
-    # cache_key_prefix = 'period_wise_data_' + json.dumps(json_request, sort_keys=True)
+
     periods = {
         "yesterday": get_date_range("Yesterday", timezone_str),
         "last7Days": get_date_range("Last 7 days", timezone_str),
@@ -1843,104 +2170,117 @@ def getPeriodWiseData(request):
         "yearToDate": get_date_range("This Year", timezone_str),
         "lastYear": get_date_range("Last Year", timezone_str)
     }
-    ordered_keys = ["yesterday", "last7Days", "last30Days", "yearToDate"]
-    ordered_response=OrderedDict()
-    def get_previous_range(current_start, current_end):
-        duration = current_end - current_start
-        return current_start - duration, current_end - duration
+
+    print("[API] PERIODS:", periods)
+
+    def get_previous_range(cs, ce):
+        d = ce - cs
+        return cs - d, ce - d
+
     period_jobs = {}
+
     for key in ["yesterday", "last7Days", "last30Days", "yearToDate"]:
         cur_start, cur_end = periods[key]
+
         if key == "yearToDate":
-            duration = cur_end - cur_start
             prev_start = periods["lastYear"][0]
-            prev_end = prev_start + duration
+            prev_end = prev_start + (cur_end - cur_start)
         else:
             prev_start, prev_end = get_previous_range(cur_start, cur_end)
+
         period_jobs[key] = {
-            "label": key.replace("last", "Last ").title().replace("Yest", "Yest"),
-            "current_start": cur_start,
-            "current_end": cur_end,
-            "previous_start": prev_start,
-            "previous_end": prev_end
+            "current": (cur_start, cur_end),
+            "previous": (prev_start, prev_end)
         }
+
+        print(f"[API] {key}:", period_jobs[key])
+
     response_data = {}
-    # for key in ["last7Days", "last30Days", "yearToDate"]:
-    #     cache_key = f"{cache_key_prefix}_{key}"
-    #     cached_data = cache.get(cache_key)
-    #     if cached_data:
-    #         response_data[key] = cached_data
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        futures = {}
-        futures["yesterday_current"] = executor.submit(
-            calculate_metricss,
-            period_jobs["yesterday"]["current_start"], period_jobs["yesterday"]["current_end"],
-            marketplace_id, brand_id, product_id, manufacturer_name,
-            fulfillment_channel, timezone_str, False, True
-        )
-        futures["yesterday_previous"] = executor.submit(
-            calculate_metricss,
-            period_jobs["yesterday"]["previous_start"], period_jobs["yesterday"]["previous_end"],
-            marketplace_id, brand_id, product_id, manufacturer_name,
-            fulfillment_channel, timezone_str, False, True
-        )
-        results = {key: f.result() for key, f in futures.items()}
+
+    # ---------------- YESTERDAY ----------------
+    print("\n[API] PROCESSING YESTERDAY")
+
+    ch_cur = fetch_clickhouse_metrics(
+        *period_jobs["yesterday"]["current"],
+        marketplace_id, brand_id, product_id,
+        manufacturer_name, fulfillment_channel
+    )
+
+    ch_prev = fetch_clickhouse_metrics(
+        *period_jobs["yesterday"]["previous"],
+        marketplace_id, brand_id, product_id,
+        manufacturer_name, fulfillment_channel
+    )
+
+    mongo = fetch_sessions_pageviews(
+        period_jobs["yesterday"]["current"][0],
+        period_jobs["yesterday"]["current"][1],
+        product_id
+    )
+
     output = {
-        "label": period_jobs["yesterday"]["label"],
-        "period": {
-            "current": {
-                "from": to_utc_format(period_jobs["yesterday"]["current_start"]),
-                "to": to_utc_format(period_jobs["yesterday"]["current_end"])
-            },
-            "previous": {
-                "from": to_utc_format(period_jobs["yesterday"]["previous_start"]),
-                "to": to_utc_format(period_jobs["yesterday"]["previous_end"])
-            }
-        }
+        "label": "yesterday",
+        "period": period_jobs["yesterday"]
     }
-    current_metrics = results["yesterday_current"]
-    previous_metrics = results["yesterday_previous"]
-    for metric in current_metrics:
-        output[metric] = {
-            "current": current_metrics[metric],
-            "previous": previous_metrics.get(metric, 0)
+
+    for k in ch_cur:
+        output[k] = {
+            "current": ch_cur[k],
+            "previous": ch_prev.get(k, 0)
         }
+
+    output["pageViews"] = mongo["page_views"]
+    output["sessions"] = mongo["sessions"]
+
     response_data["yesterday"] = output
+
+    # ---------------- OTHER PERIODS ----------------
     for key in ["last7Days", "last30Days", "yearToDate"]:
-        if key not in response_data:
-            current = calculate_metricss(
-                period_jobs[key]["current_start"], period_jobs[key]["current_end"],
-                marketplace_id, brand_id, product_id, manufacturer_name,
-                fulfillment_channel, timezone_str, False, True
-            )
-            previous = calculate_metricss(
-                period_jobs[key]["previous_start"], period_jobs[key]["previous_end"],
-                marketplace_id, brand_id, product_id, manufacturer_name,
-                fulfillment_channel, timezone_str, False, True
-            )
-            data = {
-                "label": period_jobs[key]["label"],
-                "period": {
-                    "current": {
-                        "from": to_utc_format(period_jobs[key]["current_start"]),
-                        "to": to_utc_format(period_jobs[key]["current_end"])
-                    },
-                    "previous": {
-                        "from": to_utc_format(period_jobs[key]["previous_start"]),
-                        "to": to_utc_format(period_jobs[key]["previous_end"])
-                    }
-                }
+
+        print(f"\n[API] PROCESSING {key}")
+
+        cur_start, cur_end = period_jobs[key]["current"]
+        prev_start, prev_end = period_jobs[key]["previous"]
+
+        cur = fetch_clickhouse_metrics(
+            cur_start, cur_end,
+            marketplace_id, brand_id, product_id,
+            manufacturer_name, fulfillment_channel
+        )
+
+        prev = fetch_clickhouse_metrics(
+            prev_start, prev_end,
+            marketplace_id, brand_id, product_id,
+            manufacturer_name, fulfillment_channel
+        )
+
+        mongo_stats = fetch_sessions_pageviews(cur_start, cur_end, product_id)
+
+        data = {
+            "label": key,
+            "period": period_jobs[key]
+        }
+
+        for m in cur:
+            data[m] = {
+                "current": cur[m],
+                "previous": prev.get(m, 0)
             }
-            for metric in current:
-                data[metric] = {
-                    "current": current[metric],
-                    "previous": previous.get(metric, 0)
-                }
-            response_data[key] = data
-    for key in ordered_keys:
-        if key in response_data:
-            ordered_response[key]=response_data[key]
-    return JsonResponse(ordered_response, safe=False)
+
+        data["pageViews"] = mongo_stats["page_views"]
+        data["sessions"] = mongo_stats["sessions"]
+
+        response_data[key] = data
+
+    ordered = OrderedDict()
+    for k in ["yesterday", "last7Days", "last30Days", "yearToDate"]:
+        ordered[k] = response_data[k]
+
+    print("\n================ API END ================\n")
+    print(f"[API] TOTAL TIME: {time.time() - api_start:.4f}s")
+
+    return JsonResponse(ordered, safe=False)
+
 
 @csrf_exempt
 def getPeriodWiseDataXl(request):
@@ -2080,166 +2420,476 @@ def exportPeriodWiseCSV(request):
     writer.writerow(headers)
     writer.writerows(period_rows)
     return response
+
+# @csrf_exempt
+# def getPeriodWiseDataCustom(request):
+#     def to_utc_format(dt):
+#         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+#     json_request = JSONParser().parse(request)
+#     marketplace_id = json_request.get('marketplace_id', None)
+#     brand_id = json_request.get('brand_id', [])
+#     product_id = json_request.get('product_id', [])
+#     manufacturer_name = json_request.get('manufacturer_name', [])
+#     fulfillment_channel = json_request.get('fulfillment_channel', None)
+#     timezone_str = "US/Pacific"
+#     preset = json_request.get("preset")
+#     start_date = json_request.get("start_date")
+#     end_date = json_request.get("end_date")
+#     if start_date:
+#         local_tz = pytz.timezone(timezone_str)
+#         naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
+#         naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
+#         localized_from_date = local_tz.localize(naive_from_date)
+#         localized_to_date = local_tz.localize(naive_to_date.replace(hour=23, minute=59, second=59))  
+#         from_date = localized_from_date.astimezone(pytz.UTC)
+#         to_date = localized_to_date.astimezone(pytz.UTC)
+#     else:
+#         from_date, to_date = get_date_range(preset, timezone_str)
+#     duration = to_date - from_date
+#     prev_from, prev_to = from_date - duration, to_date - duration
+#     today_start, today_end = get_date_range("Today", timezone_str)
+#     yesterday_start, yesterday_end = get_date_range("Yesterday", timezone_str)
+#     last7_start, last7_end = get_date_range("Last 7 days", timezone_str)
+#     last7_prev_start = today_start - timedelta(days=14)
+#     last7_prev_end = last7_start - timedelta(seconds=1)
+#     day_before_yesterday_start = yesterday_start - timedelta(days=1)
+#     day_before_yesterday_end = yesterday_end - timedelta(days=1)
+#     def format_metrics_response(current, previous):
+#         def format_metric(metric):
+#             current_value = sanitize_data(current.get(metric, 0))
+#             previous_value = sanitize_data(previous.get(metric, 0))
+#             delta = round(current_value - previous_value, 2)
+#             return {
+#                 "current": current_value,
+#                 "previous": previous_value,
+#                 "delta": delta
+#             }
+#         summary_metrics = [
+#             "grossRevenue", "netProfit", "expenses", "unitsSold", "refunds", "skuCount",
+#             "sessions", "pageViews", "unitSessionPercentage", "margin", "roi", "orders"
+#         ]
+#         summary = {metric: format_metric(metric) for metric in summary_metrics}
+#         def net_profit_calc(metrics):
+#             return {
+#                 "gross": sanitize_data(metrics.get("grossRevenue", 0)),
+#                 "totalCosts": sanitize_data(metrics.get("expenses", 0)),
+#                 "productRefunds": sanitize_data(metrics.get("refunds", 0)),
+#                 "totalTax": sanitize_data(metrics.get("tax_price", 0)),
+#                 "totalTaxWithheld": 0,
+#                 "ppcProductCost": 0,
+#                 "ppcBrandsCost": 0,
+#                 "ppcDisplayCost": 0,
+#                 "ppcStCost": 0,
+#                 "cogs": sanitize_data(metrics.get("total_cogs", 0)),
+#                 "product_cost": sanitize_data(metrics.get("product_cost", 0)),
+#                 "shipping_cost": sanitize_data(metrics.get("shipping_cost", 0)),
+#             }
+#         return {
+#             "summary": summary,
+#             "netProfitCalculation": {
+#                 "current": net_profit_calc(current),
+#                 "previous": net_profit_calc(previous),
+#             }
+#         }
+#     def to_local_date_string(dt, tz_str):
+#         local_tz = pytz.timezone(tz_str)
+#         return dt.astimezone(local_tz).strftime("%Y-%m-%d")
+#     def create_period_response(label, cur_from, cur_to, prev_from, prev_to, current_metrics, previous_metrics):
+#         date_ranges = {
+#             "current": {"from": to_utc_format(cur_from), "to": to_utc_format(cur_to),"from_local":to_local_date_string(cur_from,timezone_str),'to_local':to_local_date_string(cur_to,timezone_str)},
+#             "previous": {"from": to_utc_format(prev_from), "to": to_utc_format(prev_to,),"from_local":to_local_date_string(prev_from,timezone_str),'to_local':to_local_date_string(prev_to,timezone_str)}
+#         }
+#         metrics_response = format_metrics_response(current_metrics, previous_metrics)
+#         return {
+#             "dateRanges": date_ranges,
+#             **metrics_response  
+#         }
+#     with ThreadPoolExecutor(max_workers=8) as executor:
+#         future_today_current = executor.submit(
+#             calculate_metricss, 
+#             today_start, today_end, 
+#             marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
+#             timezone_str
+#         )
+#         future_today_previous = executor.submit(
+#             calculate_metricss, 
+#             yesterday_start, yesterday_end, 
+#             marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
+#             timezone_str, False, True
+#         )
+#         future_yesterday_current = executor.submit(
+#             calculate_metricss, 
+#             yesterday_start, yesterday_end, 
+#             marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
+#             timezone_str, False, True
+#         )
+#         future_yesterday_previous = executor.submit(
+#             calculate_metricss, 
+#             day_before_yesterday_start, day_before_yesterday_end, 
+#             marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
+#             timezone_str, False, True
+#         )
+#         future_last7_current = executor.submit(
+#             calculate_metricss, 
+#             last7_start, last7_end, 
+#             marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
+#             timezone_str, False, True
+#         )
+#         future_last7_previous = executor.submit(
+#             calculate_metricss, 
+#             last7_prev_start, last7_prev_end, 
+#             marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
+#             timezone_str, False, True
+#         )
+#         future_custom_current = executor.submit(
+#             calculate_metricss, 
+#             from_date, to_date, 
+#             marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
+#             timezone_str, False, True
+#         )
+#         future_custom_previous = executor.submit(
+#             calculate_metricss, 
+#             prev_from, prev_to, 
+#             marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
+#             timezone_str, False, True
+#         )
+#         today_current = future_today_current.result()
+#         today_previous = future_today_previous.result()
+#         yesterday_current = future_yesterday_current.result()
+#         yesterday_previous = future_yesterday_previous.result()
+#         last7_current = future_last7_current.result()
+#         last7_previous = future_last7_previous.result()
+#         custom_current = future_custom_current.result()
+#         custom_previous = future_custom_previous.result()
+#     response_data = {
+#         "today": create_period_response(
+#             "Today", today_start, today_end, yesterday_start, yesterday_end,
+#             today_current, today_previous
+#         ),
+#         "yesterday": create_period_response(
+#             "Yesterday", yesterday_start, yesterday_end, 
+#             day_before_yesterday_start, day_before_yesterday_end,
+#             yesterday_current, yesterday_previous
+#         ),
+#         "last7Days": create_period_response(
+#             "Last 7 Days", last7_start, last7_end, last7_prev_start, last7_prev_end,
+#             last7_current, last7_previous
+#         ),
+#         "custom": create_period_response(
+#             preset, from_date, to_date, prev_from, prev_to,
+#             custom_current, custom_previous
+#         ),
+#     }
+#     return JsonResponse(response_data, safe=False)
+from clickhouse.config import client
 @csrf_exempt
 def getPeriodWiseDataCustom(request):
+
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
     json_request = JSONParser().parse(request)
+
     marketplace_id = json_request.get('marketplace_id', None)
     brand_id = json_request.get('brand_id', [])
     product_id = json_request.get('product_id', [])
     manufacturer_name = json_request.get('manufacturer_name', [])
     fulfillment_channel = json_request.get('fulfillment_channel', None)
+
     timezone_str = "US/Pacific"
     preset = json_request.get("preset")
+
     start_date = json_request.get("start_date")
     end_date = json_request.get("end_date")
+
+    # ----------------------------
+    # DATE HANDLING
+    # ----------------------------
     if start_date:
         local_tz = pytz.timezone(timezone_str)
         naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
         naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
+
         localized_from_date = local_tz.localize(naive_from_date)
-        localized_to_date = local_tz.localize(naive_to_date.replace(hour=23, minute=59, second=59))  
+        localized_to_date = local_tz.localize(
+            naive_to_date.replace(hour=23, minute=59, second=59)
+        )
+
         from_date = localized_from_date.astimezone(pytz.UTC)
         to_date = localized_to_date.astimezone(pytz.UTC)
     else:
         from_date, to_date = get_date_range(preset, timezone_str)
+
     duration = to_date - from_date
     prev_from, prev_to = from_date - duration, to_date - duration
+
     today_start, today_end = get_date_range("Today", timezone_str)
     yesterday_start, yesterday_end = get_date_range("Yesterday", timezone_str)
     last7_start, last7_end = get_date_range("Last 7 days", timezone_str)
+
     last7_prev_start = today_start - timedelta(days=14)
     last7_prev_end = last7_start - timedelta(seconds=1)
+
     day_before_yesterday_start = yesterday_start - timedelta(days=1)
     day_before_yesterday_end = yesterday_end - timedelta(days=1)
-    def format_metrics_response(current, previous):
-        def format_metric(metric):
-            current_value = sanitize_data(current.get(metric, 0))
-            previous_value = sanitize_data(previous.get(metric, 0))
-            delta = round(current_value - previous_value, 2)
-            return {
-                "current": current_value,
-                "previous": previous_value,
-                "delta": delta
-            }
-        summary_metrics = [
-            "grossRevenue", "netProfit", "expenses", "unitsSold", "refunds", "skuCount",
-            "sessions", "pageViews", "unitSessionPercentage", "margin", "roi", "orders"
+
+    clickhouse_client = client
+
+    # ----------------------------
+    # CLICKHOUSE CORE QUERY
+    # ----------------------------
+    def fetch_metrics(start_dt, end_dt):
+
+        conditions = [
+            "order_date >= %(start)s",
+            "order_date <= %(end)s",
+            "order_status NOT IN ('Canceled','Cancelled')"
         ]
-        summary = {metric: format_metric(metric) for metric in summary_metrics}
-        def net_profit_calc(metrics):
+
+        params = {
+            "start": start_dt,
+            "end": end_dt,
+            "refund": 0
+        }
+
+        if marketplace_id and marketplace_id != "all":
+            conditions.append("marketplace_id = %(marketplace_id)s")
+            params["marketplace_id"] = str(marketplace_id)
+
+        if brand_id:
+            conditions.append("brand_id IN %(brand_id)s")
+            params["brand_id"] = tuple(str(x) for x in brand_id)
+
+        if product_id:
+            conditions.append("product_id IN %(product_id)s")
+            params["product_id"] = tuple(str(x) for x in product_id)
+
+        if manufacturer_name:
+            conditions.append("manufacturer_name IN %(manufacturer_name)s")
+            params["manufacturer_name"] = tuple(manufacturer_name)
+
+        if fulfillment_channel:
+            conditions.append("fulfillment_channel = %(fc)s")
+            params["fc"] = fulfillment_channel
+
+        where_clause = " AND ".join(conditions)
+
+        query = f"""
+        SELECT
+            round(sum(gross_revenue), 2) AS grossRevenue,
+
+            round(sum(net_item_revenue), 2) AS netRevenue,
+
+            sum(quantity) AS unitsSold,
+
+            uniqExact(purchase_order_id) AS orders,
+
+            uniqExact(sku) AS skuCount,
+
+            round(sum(item_tax), 2) AS tax_price,
+
+            round(sum(product_cost * quantity), 2) AS total_product_cost,
+
+            round(sum(referral_fee * quantity), 2) AS referral_fee,
+
+            round(sum(vendor_funding * quantity), 2) AS vendor_funding,
+
+            round(sum(vendor_discount), 2) AS vendor_discount,
+
+            round(sum(promotion_discount), 2) AS promotion_discount,
+
+            round(sum(ship_promotion_discount), 2) AS ship_promotion_discount,
+
+            round(sum(shipping_price), 2) AS shipping_cost,
+
+            round(sum(merchant_shipment_cost), 2) AS merchant_cost
+
+        FROM fact_order_items
+        WHERE {where_clause}
+        """
+
+        res = clickhouse_client.query(query, params)
+        row = res.result_rows[0]
+
+        return {
+            "grossRevenue": row[0] or 0,
+            "net_item_revenue": row[1] or 0,
+            "unitsSold": row[2] or 0,
+            "orders": row[3] or 0,
+            "skuCount": row[4] or 0,
+            "tax_price": row[5] or 0,
+            "total_product_cost": row[6] or 0,
+            "referral_fee": row[7] or 0,
+            "vendor_funding": row[8] or 0,
+            "vendor_discount": row[9] or 0,
+            "promotion_discount": row[10] or 0,
+            "ship_promotion_discount": row[11] or 0,
+            "shipping_cost": row[12] or 0,
+            "merchant_cost": row[13] or 0,
+        }
+
+    # ----------------------------
+    # MONGO ONLY FOR SESSIONS
+    # ----------------------------
+    def fetch_sessions(start_dt, end_dt):
+
+        pipeline = [
+            {
+                "$match": {
+                    "date": {"$gte": start_dt, "$lte": end_dt}
+                }
+            },
+            {
+                "$group": {
+                    "_id": None,
+                    "pageViews": {"$sum": "$page_views"},
+                    "sessions": {"$sum": "$sessions"}
+                }
+            }
+        ]
+
+        res = list(pageview_session_count.objects.aggregate(*pipeline))
+
+        if not res:
+            return {"pageViews": 0, "sessions": 0}
+
+        return res[0]
+
+    # ----------------------------
+    # METRIC WRAPPER (NO THREADING)
+    # ----------------------------
+    def build_metrics(current, previous):
+
+        def f(metric):
             return {
-                "gross": sanitize_data(metrics.get("grossRevenue", 0)),
-                "totalCosts": sanitize_data(metrics.get("expenses", 0)),
-                "productRefunds": sanitize_data(metrics.get("refunds", 0)),
-                "totalTax": sanitize_data(metrics.get("tax_price", 0)),
-                "totalTaxWithheld": 0,
-                "ppcProductCost": 0,
-                "ppcBrandsCost": 0,
-                "ppcDisplayCost": 0,
-                "ppcStCost": 0,
-                "cogs": sanitize_data(metrics.get("total_cogs", 0)),
-                "product_cost": sanitize_data(metrics.get("product_cost", 0)),
-                "shipping_cost": sanitize_data(metrics.get("shipping_cost", 0)),
+                "current": current.get(metric, 0),
+                "previous": previous.get(metric, 0),
+                "delta": round(current.get(metric, 0) - previous.get(metric, 0), 2)
             }
+
+        summary_metrics = [
+            "grossRevenue", "netProfit", "expenses", "unitsSold", "refunds",
+            "skuCount", "sessions", "pageViews",
+            "unitSessionPercentage", "margin", "roi", "orders"
+        ]
+
+        summary = {m: f(m) for m in summary_metrics}
+
+        return summary
+
+    # ----------------------------
+    # NET PROFIT (SAME LOGIC)
+    # ----------------------------
+    def compute_net(metrics):
+        gross = metrics["grossRevenue"]
+
+        expenses = (
+            metrics["total_product_cost"]
+            + metrics["referral_fee"]
+            + metrics["vendor_discount"]
+            + metrics["ship_promotion_discount"]
+            + metrics["merchant_cost"]
+        )
+
+        net_profit = (
+            metrics["net_item_revenue"]
+            + metrics["shipping_cost"]
+            + metrics["promotion_discount"]
+            + metrics["vendor_funding"]
+            - expenses
+        )
+
         return {
-            "summary": summary,
+            "gross": gross,
+            "totalCosts": expenses,
+            "productRefunds": 0,
+            "totalTax": metrics["tax_price"],
+            "totalTaxWithheld": 0,
+            "ppcProductCost": 0,
+            "ppcBrandsCost": 0,
+            "ppcDisplayCost": 0,
+            "ppcStCost": 0,
+            "cogs": metrics["total_product_cost"],
+            "product_cost": metrics["total_product_cost"],
+            "shipping_cost": metrics["shipping_cost"],
+            "netProfit": net_profit
+        }
+
+    # ----------------------------
+    # PERIOD BUILDER
+    # ----------------------------
+    def create_response(cur_from, cur_to, prev_from, prev_to):
+
+        current = fetch_metrics(cur_from, cur_to)
+        previous = fetch_metrics(prev_from, prev_to)
+
+        current_sessions = fetch_sessions(cur_from, cur_to)
+        previous_sessions = fetch_sessions(prev_from, prev_to)
+
+        current.update(current_sessions)
+        previous.update(previous_sessions)
+
+        current["refunds"] = 0
+        previous["refunds"] = 0
+
+        current["netProfit"] = compute_net(current)["netProfit"]
+        previous["netProfit"] = compute_net(previous)["netProfit"]
+
+        current["expenses"] = 0
+        previous["expenses"] = 0
+
+        current["margin"] = (current["netProfit"] / current["grossRevenue"] * 100) if current["grossRevenue"] else 0
+        previous["margin"] = (previous["netProfit"] / previous["grossRevenue"] * 100) if previous["grossRevenue"] else 0
+
+        current["roi"] = 0
+        previous["roi"] = 0
+
+        current["unitSessionPercentage"] = (
+            current["unitsSold"] / current["sessions"] * 100
+            if current.get("sessions") else 0
+        )
+
+        previous["unitSessionPercentage"] = (
+            previous["unitsSold"] / previous["sessions"] * 100
+            if previous.get("sessions") else 0
+        )
+
+        return {
+            "dateRanges": {
+                "current": {
+                    "from": to_utc_format(cur_from),
+                    "to": to_utc_format(cur_to)
+                },
+                "previous": {
+                    "from": to_utc_format(prev_from),
+                    "to": to_utc_format(prev_to)
+                }
+            },
+            "summary": build_metrics(current, previous),
             "netProfitCalculation": {
-                "current": net_profit_calc(current),
-                "previous": net_profit_calc(previous),
+                "current": compute_net(current),
+                "previous": compute_net(previous)
             }
         }
-    def to_local_date_string(dt, tz_str):
-        local_tz = pytz.timezone(tz_str)
-        return dt.astimezone(local_tz).strftime("%Y-%m-%d")
-    def create_period_response(label, cur_from, cur_to, prev_from, prev_to, current_metrics, previous_metrics):
-        date_ranges = {
-            "current": {"from": to_utc_format(cur_from), "to": to_utc_format(cur_to),"from_local":to_local_date_string(cur_from,timezone_str),'to_local':to_local_date_string(cur_to,timezone_str)},
-            "previous": {"from": to_utc_format(prev_from), "to": to_utc_format(prev_to,),"from_local":to_local_date_string(prev_from,timezone_str),'to_local':to_local_date_string(prev_to,timezone_str)}
-        }
-        metrics_response = format_metrics_response(current_metrics, previous_metrics)
-        return {
-            "dateRanges": date_ranges,
-            **metrics_response  
-        }
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        future_today_current = executor.submit(
-            calculate_metricss, 
-            today_start, today_end, 
-            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
-            timezone_str
-        )
-        future_today_previous = executor.submit(
-            calculate_metricss, 
-            yesterday_start, yesterday_end, 
-            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
-            timezone_str, False, True
-        )
-        future_yesterday_current = executor.submit(
-            calculate_metricss, 
-            yesterday_start, yesterday_end, 
-            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
-            timezone_str, False, True
-        )
-        future_yesterday_previous = executor.submit(
-            calculate_metricss, 
-            day_before_yesterday_start, day_before_yesterday_end, 
-            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
-            timezone_str, False, True
-        )
-        future_last7_current = executor.submit(
-            calculate_metricss, 
-            last7_start, last7_end, 
-            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
-            timezone_str, False, True
-        )
-        future_last7_previous = executor.submit(
-            calculate_metricss, 
-            last7_prev_start, last7_prev_end, 
-            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
-            timezone_str, False, True
-        )
-        future_custom_current = executor.submit(
-            calculate_metricss, 
-            from_date, to_date, 
-            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
-            timezone_str, False, True
-        )
-        future_custom_previous = executor.submit(
-            calculate_metricss, 
-            prev_from, prev_to, 
-            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
-            timezone_str, False, True
-        )
-        today_current = future_today_current.result()
-        today_previous = future_today_previous.result()
-        yesterday_current = future_yesterday_current.result()
-        yesterday_previous = future_yesterday_previous.result()
-        last7_current = future_last7_current.result()
-        last7_previous = future_last7_previous.result()
-        custom_current = future_custom_current.result()
-        custom_previous = future_custom_previous.result()
+
+    # ----------------------------
+    # RESPONSE
+    # ----------------------------
     response_data = {
-        "today": create_period_response(
-            "Today", today_start, today_end, yesterday_start, yesterday_end,
-            today_current, today_previous
+        "today": create_response(today_start, today_end, yesterday_start, yesterday_end),
+        "yesterday": create_response(
+            yesterday_start, yesterday_end,
+            day_before_yesterday_start, day_before_yesterday_end
         ),
-        "yesterday": create_period_response(
-            "Yesterday", yesterday_start, yesterday_end, 
-            day_before_yesterday_start, day_before_yesterday_end,
-            yesterday_current, yesterday_previous
+        "last7Days": create_response(
+            last7_start, last7_end,
+            last7_prev_start, last7_prev_end
         ),
-        "last7Days": create_period_response(
-            "Last 7 Days", last7_start, last7_end, last7_prev_start, last7_prev_end,
-            last7_current, last7_previous
-        ),
-        "custom": create_period_response(
-            preset, from_date, to_date, prev_from, prev_to,
-            custom_current, custom_previous
-        ),
+        "custom": create_response(from_date, to_date, prev_from, prev_to),
     }
+
     return JsonResponse(response_data, safe=False)
+
 
 # @csrf_exempt
 # def allMarketplaceData(request):
@@ -3163,6 +3813,7 @@ def sales(orders):
             sku_summary[sku]["margin"] = round(margin, 2)
     sorted_skus = sorted(sku_summary.values(), key=lambda x: x["unitsSold"], reverse=True)
     return sorted_skus
+
 @csrf_exempt
 def getProductPerformanceSummary(request):
     json_request = JSONParser().parse(request)
@@ -3194,6 +3845,7 @@ def getProductPerformanceSummary(request):
         prev_data = future_prev_data.result()
     data = get_top_movers(yes_data, prev_data)
     return JsonResponse(data)
+
 @csrf_exempt
 def downloadProductPerformanceSummary(request):
     json_request = JSONParser().parse(request)
