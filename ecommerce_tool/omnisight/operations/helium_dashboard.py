@@ -3714,6 +3714,7 @@ def downloadMarketplaceDataCSV(request):
     for row in metrics:
         writer.writerow(row)
     return response
+
 def sales(orders):
     sku_summary = defaultdict(lambda: {
         "sku": "",
@@ -3814,37 +3815,110 @@ def sales(orders):
     sorted_skus = sorted(sku_summary.values(), key=lambda x: x["unitsSold"], reverse=True)
     return sorted_skus
 
+# @csrf_exempt
+# def getProductPerformanceSummary(request):
+#     json_request = JSONParser().parse(request)
+#     marketplace_id = json_request.get('marketplace_id', None)
+#     brand_id = json_request.get('brand_id', [])
+#     product_id = json_request.get('product_id',[])
+#     manufacturer_name = json_request.get('manufacturer_name',[])
+#     fulfillment_channel = json_request.get('fulfillment_channel',None)
+#     timezone_str =  'US/Pacific'
+#     local_tz = pytz.timezone(timezone_str)
+#     today = datetime.now(local_tz)
+#     yesterday_start_date = today - timedelta(days=1)
+#     yesterday_start_date = yesterday_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+#     yesterday_end_date = yesterday_start_date.replace(hour=23, minute=59, second=59)
+#     previous_day_start_date = yesterday_start_date - timedelta(days=1)
+#     previous_day_start_date = previous_day_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+#     previous_day_end_date = previous_day_start_date.replace(hour=23, minute=59, second=59)
+#     def fetch_data(start_date, end_date):
+#         return grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,timezone_str)
+#     with ThreadPoolExecutor(max_workers=2) as executor:
+#         future_prev_data = executor.submit(fetch_data, previous_day_start_date, previous_day_end_date)
+#         future_yes_data = executor.submit(fetch_data, yesterday_start_date, yesterday_end_date)
+#         prev_data = future_prev_data.result()
+#         yes_data = future_yes_data.result()
+#     with ThreadPoolExecutor(max_workers=2) as executor:
+#         future_yes_data = executor.submit(sales, yes_data)
+#         future_prev_data = executor.submit(sales, prev_data)
+#         yes_data = future_yes_data.result()
+#         prev_data = future_prev_data.result()
+#     data = get_top_movers(yes_data, prev_data)
+#     return JsonResponse(data)
+
+
+
+from clickhouse.config import client
+# -----------------------------
+
 @csrf_exempt
 def getProductPerformanceSummary(request):
+
+    from django.http import JsonResponse
+    from rest_framework.parsers import JSONParser
+
     json_request = JSONParser().parse(request)
-    marketplace_id = json_request.get('marketplace_id', None)
-    brand_id = json_request.get('brand_id', [])
-    product_id = json_request.get('product_id',[])
-    manufacturer_name = json_request.get('manufacturer_name',[])
-    fulfillment_channel = json_request.get('fulfillment_channel',None)
-    timezone_str =  'US/Pacific'
-    local_tz = pytz.timezone(timezone_str)
-    today = datetime.now(local_tz)
-    yesterday_start_date = today - timedelta(days=1)
-    yesterday_start_date = yesterday_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
-    yesterday_end_date = yesterday_start_date.replace(hour=23, minute=59, second=59)
-    previous_day_start_date = yesterday_start_date - timedelta(days=1)
-    previous_day_start_date = previous_day_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
-    previous_day_end_date = previous_day_start_date.replace(hour=23, minute=59, second=59)
-    def fetch_data(start_date, end_date):
-        return grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,timezone_str)
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        future_prev_data = executor.submit(fetch_data, previous_day_start_date, previous_day_end_date)
-        future_yes_data = executor.submit(fetch_data, yesterday_start_date, yesterday_end_date)
-        prev_data = future_prev_data.result()
-        yes_data = future_yes_data.result()
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        future_yes_data = executor.submit(sales, yes_data)
-        future_prev_data = executor.submit(sales, prev_data)
-        yes_data = future_yes_data.result()
-        prev_data = future_prev_data.result()
-    data = get_top_movers(yes_data, prev_data)
-    return JsonResponse(data)
+
+    print("\n================ DEBUG START ================\n")
+    print("RAW REQUEST:", json_request)
+
+    # ---------------- CLICKHOUSE QUERY (NO FILTERS) ----------------
+    query = """
+    SELECT
+        product_id,
+        sku,
+        unitsSold,
+        grossRevenue,
+        totalCogs,
+        vendor_funding,
+        (grossRevenue - totalCogs + vendor_funding) AS netProfit,
+        if(grossRevenue > 0,
+            ((grossRevenue - totalCogs + vendor_funding) / grossRevenue) * 100,
+            0
+        ) AS margin
+    FROM
+    (
+        SELECT
+            product_id,
+            sku,
+            sum(quantity) AS unitsSold,
+            sum(gross_revenue) AS grossRevenue,
+            sum(cogs) AS totalCogs,
+            sum(vendor_funding) AS vendor_funding
+        FROM fact_order_items
+        WHERE order_status NOT IN ('Canceled','Cancelled')
+        GROUP BY product_id, sku
+    )
+    LIMIT 15
+    """
+
+    print("\nCLICKHOUSE QUERY:\n", query)
+
+    try:
+        rows = client.query(query).result_rows
+    except Exception as e:
+        print("CLICKHOUSE ERROR:", str(e))
+        return JsonResponse([], safe=False)
+
+    print("\nROW COUNT:", len(rows))
+    print("\n================ DEBUG END ================\n")
+
+    # ---------------- RESPONSE ----------------
+    result = []
+    for r in rows:
+        result.append({
+            "product_id": r[0] or "",
+            "sku": r[1] or "",
+            "unitsSold": r[2] or 0,
+            "grossRevenue": r[3] or 0,
+            "totalCogs": r[4] or 0,
+            "vendor_funding": r[5] or 0,
+            "netProfit": r[6] or 0,
+            "margin": r[7] or 0
+        })
+
+    return JsonResponse(result, safe=False)
 
 @csrf_exempt
 def downloadProductPerformanceSummary(request):
