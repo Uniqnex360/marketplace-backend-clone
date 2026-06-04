@@ -883,67 +883,363 @@ def RevenueWidgetAPIView(request):
             del data['total']["orders"]
     return data
 
+# @csrf_exempt
+# def updatedRevenueWidgetAPIView(request):
+#     json_request = JSONParser().parse(request)
+#     preset = json_request.get("preset", "Today")
+#     compare_startdate = json_request.get("compare_startdate")
+#     compare_enddate = json_request.get("compare_enddate")
+#     marketplace_id = json_request.get("marketplace_id", None)
+#     product_id = json_request.get("product_id", None)
+#     brand_id = json_request.get("brand_id", None)
+#     manufacturer_name = json_request.get("manufacturer_name", None)
+#     fulfillment_channel = json_request.get("fulfillment_channel", None)
+#     timezone_str = "US/Pacific"
+#     start_date = json_request.get("start_date", None)
+#     end_date = json_request.get("end_date", None)
+#     if start_date not in [None, ""]:
+#         start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
+#     else:
+#         start_date, end_date = get_date_range(preset, timezone_str)
+#     compare_enabled = compare_startdate not in [None, ""]
+#     if compare_enabled:
+#         compare_startdate = datetime.strptime(compare_startdate, "%Y-%m-%d").replace(
+#             hour=0, minute=0, second=0, microsecond=0
+#         )
+#         compare_enddate = datetime.strptime(compare_enddate, "%Y-%m-%d").replace(
+#             hour=23, minute=59, second=59, microsecond=0
+#         )
+#     comapre_past = get_previous_periods(start_date, end_date)
+#     def fetch_total():
+#         return totalRevenueCalculation(
+#             start_date, end_date, marketplace_id, brand_id,
+#             product_id, manufacturer_name, fulfillment_channel, timezone_str
+#         )
+#     def fetch_graph_data():
+#         return get_graph_data(
+#             start_date, end_date, preset, marketplace_id, brand_id,
+#             product_id, manufacturer_name, fulfillment_channel, timezone_str
+#         )
+#     def fetch_compare_total():
+#         return totalRevenueCalculation(
+#             compare_startdate, compare_enddate, marketplace_id,
+#             brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str
+#         )
+#     def fetch_compare_graph_data():
+#         initial = "Today" if compare_startdate.date() == compare_enddate.date() else None
+#         return get_graph_data(
+#             compare_startdate, compare_enddate, initial, marketplace_id,
+#             brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str
+#         )
+#     with ThreadPoolExecutor(max_workers=4) as executor:
+#         future_total = executor.submit(fetch_total)
+#         future_graph_data = executor.submit(fetch_graph_data)
+#         future_compare_total = executor.submit(fetch_compare_total) if compare_enabled else None
+#         future_compare_graph_data = executor.submit(fetch_compare_graph_data) if compare_enabled else None
+#         total = future_total.result()
+#         graph_data = future_graph_data.result()
+#         compare_total = future_compare_total.result() if compare_enabled else None
+#         compare_graph = future_compare_graph_data.result() if compare_enabled else None
+#     updated_graph = {}
+#     if compare_enabled:
+#         for index, (key, metrics) in enumerate(graph_data.items()):
+#             compare_metrics = list(compare_graph.values())[index] if index < len(compare_graph) else {}
+#             updated_graph[key] = {
+#                 "current_date": key,
+#                 "gross_revenue_with_tax": metrics.get("gross_revenue_with_tax", 0),
+#                 "net_profit": metrics.get("net_profit", 0),
+#                 "profit_margin": metrics.get("profit_margin", 0),
+#                 "orders": metrics.get("orders", 0),
+#                 "units_sold": metrics.get("units_sold", 0),
+#                 "refund_amount": metrics.get("refund_amount", 0),
+#                 "refund_quantity": metrics.get("refund_quantity", 0),
+#                 "compare_gross_revenue": compare_metrics.get("gross_revenue", 0),
+#                 "compare_net_profit": compare_metrics.get("net_profit", 0),
+#                 "compare_profit_margin": compare_metrics.get("profit_margin", 0),
+#                 "compare_orders": compare_metrics.get("orders", 0),
+#                 "compare_units_sold": compare_metrics.get("units_sold", 0),
+#                 "compare_refund_amount": compare_metrics.get("refund_amount", 0),
+#                 "compare_refund_quantity": compare_metrics.get("refund_quantity", 0),
+#                 "compare_date": list(compare_graph.keys())[index] if index < len(compare_graph) else None,
+#             }
+#     else:
+#         for key, metrics in graph_data.items():
+#             updated_graph[key] = {
+#                 "current_date": key,
+#                 "gross_revenue_with_tax": metrics.get("gross_revenue_with_tax", 0),
+#                 "net_profit": metrics.get("net_profit", 0),
+#                 "profit_margin": metrics.get("profit_margin", 0),
+#                 "orders": metrics.get("orders", 0),
+#                 "units_sold": metrics.get("units_sold", 0),
+#                 "refund_amount": metrics.get("refund_amount", 0),
+#                 "refund_quantity": metrics.get("refund_quantity", 0),
+#             }
+#     data = {
+#         "total": total,
+#         "graph": updated_graph,
+#         "comapre_past": comapre_past,
+#     }
+#     if compare_enabled:
+#         difference = {
+#             "gross_revenue": round(((total["gross_revenue"] - compare_total["gross_revenue"]) / compare_total["gross_revenue"] * 100) if compare_total["gross_revenue"] else 0, 2),
+#             "net_profit": round(((total["net_profit"] - compare_total["net_profit"]) / compare_total["net_profit"] * 100) if compare_total["net_profit"] else 0, 2),
+#             "profit_margin": round(((total["profit_margin"] - compare_total["profit_margin"]) / compare_total["profit_margin"] * 100) if compare_total["profit_margin"] else 0, 2),
+#             "orders": round(((total["orders"] - compare_total["orders"]) / compare_total["orders"] * 100) if compare_total["orders"] else 0, 2),
+#             "units_sold": round(((total["units_sold"] - compare_total["units_sold"]) / compare_total["units_sold"] * 100) if compare_total["units_sold"] else 0, 2),
+#             "refund_amount": round(((total["refund_amount"] - compare_total["refund_amount"]) / compare_total["refund_amount"] * 100) if compare_total["refund_amount"] else 0, 2),
+#             "refund_quantity": round(((total["refund_quantity"] - compare_total["refund_quantity"]) / compare_total["refund_quantity"] * 100) if compare_total["refund_quantity"] else 0, 2),
+#         }
+#         data['compare_total'] = difference
+#     name = "Revenue"
+#     item_pipeline = [{"$match": {"name": name}}]
+#     item_result = list(chooseMatrix.objects.aggregate(*item_pipeline))
+#     if item_result:
+#         item_result = item_result[0]
+#         if not item_result['select_all']:
+#             for field in ['gross_revenue', 'units_sold', 'refund_quantity',
+#                           'refund_amount', 'net_profit', 'profit_margin', 'orders']:
+#                 if not item_result.get(field, True):
+#                     data['total'].pop(field, None)
+#     return data
+def clickhouse_total_revenue(start_date, end_date, filters):
+
+    query = f"""
+    SELECT
+        sum(item_price * quantity) AS gross_revenue_with_tax,
+
+        sum(
+            (item_price * quantity)
+            - coalesce(product_cost * quantity, 0)
+            - coalesce(referral_fee * quantity, 0)
+            - coalesce(vendor_discount, 0)
+            - coalesce(ship_promotion_discount, 0)
+        ) AS net_profit,
+
+        sum(quantity) AS units_sold,
+
+        uniq(order_id) AS orders
+
+    FROM fact_order_items
+    WHERE order_date >= toDateTime('{start_date}')
+      AND order_date < toDateTime('{end_date}')
+    """
+    marketplace_id = filters.get("marketplace_id")
+    if marketplace_id and marketplace_id != "all":
+        query += f" AND marketplace_id = '{filters['marketplace_id']}'"
+
+    if filters.get("brand_id"):
+        query += f" AND brand_id IN {tuple(filters['brand_id'])}"
+
+    if filters.get("product_id"):
+        query += f" AND product_id IN {tuple(filters['product_id'])}"
+
+    if filters.get("manufacturer_name"):
+        query += f" AND manufacturer_name IN {tuple(filters['manufacturer_name'])}"
+
+    if filters.get("fulfillment_channel"):
+        query += f" AND fulfillment_channel = '{filters['fulfillment_channel']}'"
+
+    result = client.query(query).result_rows
+
+    if not result:
+        return None
+
+    row = result[0]
+
+    gross = row[0] or 0
+    net = row[1] or 0
+
+    return {
+        "gross_revenue_with_tax": gross,
+        "net_profit": net,
+        "units_sold": row[2] or 0,
+        "orders": row[3] or 0,
+        "refund_amount": 0,        # if not in CH yet
+        "refund_quantity": 0,      # if not in CH yet
+        "profit_margin": round((net / gross) * 100, 2) if gross else 0
+    }
+
+
+def clickhouse_graph_query(start_date, end_date, preset,
+                           marketplace_id, brand_id=None,
+                           product_id=None, manufacturer_name=None,
+                           fulfillment_channel=None, timezone="UTC"):
+
+    time_format = "%Y-%m-%d %H:00:00"
+
+    query = f"""
+    SELECT
+        formatDateTime(order_date, '{time_format}') AS bucket,
+
+        sum(item_price * quantity) AS gross_revenue_with_tax,
+
+        sum(
+            (item_price * quantity)
+            - coalesce(product_cost * quantity, 0)
+            - coalesce(referral_fee * quantity, 0)
+            - coalesce(vendor_discount, 0)
+            - coalesce(ship_promotion_discount, 0)
+        ) AS net_profit,
+
+        uniq(order_id) AS orders,
+
+        sum(quantity) AS units_sold
+
+    FROM fact_order_items
+    WHERE order_date >= toDateTime('{start_date}')
+      AND order_date < toDateTime('{end_date}')
+    GROUP BY bucket
+    ORDER BY bucket
+    """
+
+    result = client.query(query).result_rows
+
+    if not result:
+        return None
+
+    graph = {}
+
+    for row in result:
+        bucket = row[0]
+        gross = row[1] or 0
+        net = row[2] or 0
+
+        graph[bucket] = {
+            "gross_revenue_with_tax": gross,
+            "net_profit": net,
+            "profit_margin": round((net / gross) * 100, 2) if gross else 0,
+            "orders": row[3] or 0,
+            "units_sold": row[4] or 0,
+            "refund_amount": 0,
+            "refund_quantity": 0,
+        }
+
+    return graph
+
+
 @csrf_exempt
 def updatedRevenueWidgetAPIView(request):
+
     json_request = JSONParser().parse(request)
+
     preset = json_request.get("preset", "Today")
     compare_startdate = json_request.get("compare_startdate")
     compare_enddate = json_request.get("compare_enddate")
+
     marketplace_id = json_request.get("marketplace_id", None)
     product_id = json_request.get("product_id", None)
     brand_id = json_request.get("brand_id", None)
     manufacturer_name = json_request.get("manufacturer_name", None)
     fulfillment_channel = json_request.get("fulfillment_channel", None)
+
     timezone_str = "US/Pacific"
+
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
-    if start_date not in [None, ""]:
+
+    # -----------------------------
+    # DATE RESOLUTION
+    # -----------------------------
+    if start_date:
         start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
     else:
         start_date, end_date = get_date_range(preset, timezone_str)
+
     compare_enabled = compare_startdate not in [None, ""]
+
     if compare_enabled:
-        compare_startdate = datetime.strptime(compare_startdate, "%Y-%m-%d").replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
-        compare_enddate = datetime.strptime(compare_enddate, "%Y-%m-%d").replace(
-            hour=23, minute=59, second=59, microsecond=0
-        )
+        compare_startdate = datetime.strptime(compare_startdate, "%Y-%m-%d")
+        compare_enddate = datetime.strptime(compare_enddate, "%Y-%m-%d")
+
     comapre_past = get_previous_periods(start_date, end_date)
-    def fetch_total():
-        return totalRevenueCalculation(
-            start_date, end_date, marketplace_id, brand_id,
-            product_id, manufacturer_name, fulfillment_channel, timezone_str
+
+    # -----------------------------
+    # CLICKHOUSE PRIMARY CALLS (NO CONCURRENCY)
+    # -----------------------------
+    filters = {
+        "marketplace_id": marketplace_id,
+        "brand_id": brand_id,
+        "product_id": product_id,
+        "manufacturer_name": manufacturer_name,
+        "fulfillment_channel": fulfillment_channel
+    }
+
+    total = clickhouse_total_revenue(start_date, end_date, filters)
+    graph_data = clickhouse_graph_query(
+        start_date, end_date, preset,
+        marketplace_id, brand_id,
+        product_id, manufacturer_name,
+        fulfillment_channel, timezone_str
+    )
+
+    # -----------------------------
+    # FALLBACK ONLY IF CLICKHOUSE FAILS
+    # -----------------------------
+    if not total:
+        total = totalRevenueCalculation(
+            start_date, end_date,
+            marketplace_id, brand_id,
+            product_id, manufacturer_name,
+            fulfillment_channel, timezone_str
         )
-    def fetch_graph_data():
-        return get_graph_data(
-            start_date, end_date, preset, marketplace_id, brand_id,
-            product_id, manufacturer_name, fulfillment_channel, timezone_str
+
+    if not graph_data:
+        graph_data = get_graph_data(
+            start_date, end_date, preset,
+            marketplace_id, brand_id,
+            product_id, manufacturer_name,
+            fulfillment_channel, timezone_str
         )
-    def fetch_compare_total():
-        return totalRevenueCalculation(
-            compare_startdate, compare_enddate, marketplace_id,
-            brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str
-        )
-    def fetch_compare_graph_data():
-        initial = "Today" if compare_startdate.date() == compare_enddate.date() else None
-        return get_graph_data(
-            compare_startdate, compare_enddate, initial, marketplace_id,
-            brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str
-        )
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        future_total = executor.submit(fetch_total)
-        future_graph_data = executor.submit(fetch_graph_data)
-        future_compare_total = executor.submit(fetch_compare_total) if compare_enabled else None
-        future_compare_graph_data = executor.submit(fetch_compare_graph_data) if compare_enabled else None
-        total = future_total.result()
-        graph_data = future_graph_data.result()
-        compare_total = future_compare_total.result() if compare_enabled else None
-        compare_graph = future_compare_graph_data.result() if compare_enabled else None
-    updated_graph = {}
+
+    # -----------------------------
+    # COMPARE LOGIC (NO CONCURRENCY)
+    # -----------------------------
+    compare_total = None
+    compare_graph = None
+
     if compare_enabled:
-        for index, (key, metrics) in enumerate(graph_data.items()):
-            compare_metrics = list(compare_graph.values())[index] if index < len(compare_graph) else {}
+
+        compare_total = clickhouse_total_revenue(
+            compare_startdate, compare_enddate, filters
+        )
+
+        compare_graph = clickhouse_graph_query(
+            compare_startdate, compare_enddate,
+            preset, marketplace_id,
+            brand_id, product_id,
+            manufacturer_name,
+            fulfillment_channel, timezone_str
+        )
+
+        # fallback only if needed
+        if not compare_total:
+            compare_total = totalRevenueCalculation(
+                compare_startdate, compare_enddate,
+                marketplace_id, brand_id,
+                product_id, manufacturer_name,
+                fulfillment_channel, timezone_str
+            )
+
+        if not compare_graph:
+            compare_graph = get_graph_data(
+                compare_startdate, compare_enddate,
+                preset, marketplace_id,
+                brand_id, product_id,
+                manufacturer_name,
+                fulfillment_channel, timezone_str
+            )
+
+    # -----------------------------
+    # GRAPH MERGE (UNCHANGED)
+    # -----------------------------
+    updated_graph = {}
+
+    if compare_enabled and compare_graph:
+
+        for i, (key, metrics) in enumerate(graph_data.items()):
+
+            compare_metrics = list(compare_graph.values())[i] if i < len(compare_graph) else {}
+
             updated_graph[key] = {
                 "current_date": key,
                 "gross_revenue_with_tax": metrics.get("gross_revenue_with_tax", 0),
@@ -953,264 +1249,452 @@ def updatedRevenueWidgetAPIView(request):
                 "units_sold": metrics.get("units_sold", 0),
                 "refund_amount": metrics.get("refund_amount", 0),
                 "refund_quantity": metrics.get("refund_quantity", 0),
-                "compare_gross_revenue": compare_metrics.get("gross_revenue", 0),
+
+                "compare_gross_revenue": compare_metrics.get("gross_revenue_with_tax", 0),
                 "compare_net_profit": compare_metrics.get("net_profit", 0),
                 "compare_profit_margin": compare_metrics.get("profit_margin", 0),
                 "compare_orders": compare_metrics.get("orders", 0),
                 "compare_units_sold": compare_metrics.get("units_sold", 0),
                 "compare_refund_amount": compare_metrics.get("refund_amount", 0),
                 "compare_refund_quantity": compare_metrics.get("refund_quantity", 0),
-                "compare_date": list(compare_graph.keys())[index] if index < len(compare_graph) else None,
+                "compare_date": list(compare_graph.keys())[i] if i < len(compare_graph) else None,
             }
+
     else:
-        for key, metrics in graph_data.items():
-            updated_graph[key] = {
-                "current_date": key,
-                "gross_revenue_with_tax": metrics.get("gross_revenue_with_tax", 0),
-                "net_profit": metrics.get("net_profit", 0),
-                "profit_margin": metrics.get("profit_margin", 0),
-                "orders": metrics.get("orders", 0),
-                "units_sold": metrics.get("units_sold", 0),
-                "refund_amount": metrics.get("refund_amount", 0),
-                "refund_quantity": metrics.get("refund_quantity", 0),
-            }
+        updated_graph = graph_data
+
+    # -----------------------------
+    # RESPONSE (UNCHANGED)
+    # -----------------------------
     data = {
         "total": total,
         "graph": updated_graph,
         "comapre_past": comapre_past,
     }
-    if compare_enabled:
-        difference = {
-            "gross_revenue": round(((total["gross_revenue"] - compare_total["gross_revenue"]) / compare_total["gross_revenue"] * 100) if compare_total["gross_revenue"] else 0, 2),
-            "net_profit": round(((total["net_profit"] - compare_total["net_profit"]) / compare_total["net_profit"] * 100) if compare_total["net_profit"] else 0, 2),
-            "profit_margin": round(((total["profit_margin"] - compare_total["profit_margin"]) / compare_total["profit_margin"] * 100) if compare_total["profit_margin"] else 0, 2),
-            "orders": round(((total["orders"] - compare_total["orders"]) / compare_total["orders"] * 100) if compare_total["orders"] else 0, 2),
-            "units_sold": round(((total["units_sold"] - compare_total["units_sold"]) / compare_total["units_sold"] * 100) if compare_total["units_sold"] else 0, 2),
-            "refund_amount": round(((total["refund_amount"] - compare_total["refund_amount"]) / compare_total["refund_amount"] * 100) if compare_total["refund_amount"] else 0, 2),
-            "refund_quantity": round(((total["refund_quantity"] - compare_total["refund_quantity"]) / compare_total["refund_quantity"] * 100) if compare_total["refund_quantity"] else 0, 2),
+
+    # -----------------------------
+    # COMPARE % CALC
+    # -----------------------------
+    if compare_enabled and compare_total:
+
+        def pct(a, b):
+            return round(((a - b) / b * 100), 2) if b else 0
+
+        data["compare_total"] = {
+            "gross_revenue": pct(total["gross_revenue_with_tax"], compare_total["gross_revenue_with_tax"]),
+            "net_profit": pct(total["net_profit"], compare_total["net_profit"]),
+            "profit_margin": pct(total["profit_margin"], compare_total["profit_margin"]),
+            "orders": pct(total["orders"], compare_total["orders"]),
+            "units_sold": pct(total["units_sold"], compare_total["units_sold"]),
+            "refund_amount": pct(total["refund_amount"], compare_total["refund_amount"]),
+            "refund_quantity": pct(total["refund_quantity"], compare_total["refund_quantity"]),
         }
-        data['compare_total'] = difference
+
+    # -----------------------------
+    # MATRIX FILTER (UNCHANGED)
+    # -----------------------------
     name = "Revenue"
-    item_pipeline = [{"$match": {"name": name}}]
-    item_result = list(chooseMatrix.objects.aggregate(*item_pipeline))
+    item_result = list(chooseMatrix.objects.aggregate({"$match": {"name": name}}))
+
     if item_result:
         item_result = item_result[0]
-        if not item_result['select_all']:
-            for field in ['gross_revenue', 'units_sold', 'refund_quantity',
-                          'refund_amount', 'net_profit', 'profit_margin', 'orders']:
+
+        if not item_result.get("select_all", False):
+            for field in [
+                "gross_revenue", "units_sold", "refund_quantity",
+                "refund_amount", "net_profit", "profit_margin", "orders"
+            ]:
                 if not item_result.get(field, True):
-                    data['total'].pop(field, None)
+                    data["total"].pop(field, None)
+
     return data
+
+# @csrf_exempt
+# def get_top_products(request):
+#     json_request = JSONParser().parse(request)
+#     marketplace_id = json_request.get('marketplace_id', None)
+#     brand_id = json_request.get('brand_id', None)
+#     product_id = json_request.get('product_id', None)
+#     metric = json_request.get("sortBy", "units_sold")  
+#     preset = json_request.get("preset", "Today")  
+#     start_date_str = json_request.get("start_date", None)
+#     end_date_str = json_request.get("end_date", None)
+#     timezone_str = "US/Pacific"
+#     if start_date_str and end_date_str:
+#         local_tz = pytz.timezone(timezone_str)
+#         naive_from_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+#         naive_to_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+#         localized_from_date = local_tz.localize(naive_from_date)
+#         localized_to_date = local_tz.localize(naive_to_date).replace(hour=23, minute=59, second=59)
+#         start_date = localized_from_date.astimezone(pytz.UTC)
+#         end_date = localized_to_date.astimezone(pytz.UTC)
+#     else:
+#         start_date, end_date = get_date_range(preset, timezone_str)  
+#     duration_hours = (end_date - start_date).total_seconds() / 3600
+#     if duration_hours <= 24:
+#         chart_date_format = "%Y-%m-%d %H:00:00+00:00"
+#     else:
+#         chart_date_format = "%Y-%m-%d 00:00:00+00:00"
+#     sort_field = {
+#         "units_sold": "total_units",
+#         "price": "total_price",
+#         "refund": "refund_qty"
+#     }.get(metric, "total_units")
+#     chart_value_field = {
+#         "units_sold": "$order_items_ins.ProductDetails.QuantityOrdered",
+#         "price": {
+#             "$multiply": [
+#                 "$order_items_ins.Pricing.ItemPrice.Amount",
+#                 "$order_items_ins.ProductDetails.QuantityOrdered"
+#             ]
+#         },
+#         "refund": "$order_items_ins.ProductDetails.QuantityShipped"
+#     }.get(metric, "$order_items_ins.ProductDetails.QuantityOrdered")
+#     match = dict()
+#     match['order_date'] = {"$gte": start_date, "$lt": end_date}
+#     match['order_status'] = {"$in": ['Shipped', 'Delivered', 'Acknowledged', 'Pending', 'Unshipped', 'PartiallyShipped']}
+#     if marketplace_id and marketplace_id not in ["all", "custom"]:
+#         match['marketplace_id'] = ObjectId(marketplace_id)
+#     if metric == "refund":
+#         match['order_status'] = "Refunded"
+#     brand_ids_for_match = []
+#     if brand_id:
+#         if isinstance(brand_id, str):
+#             brand_ids_for_match = [ObjectId(brand_id)]
+#         elif isinstance(brand_id, list):
+#             brand_ids_for_match = [ObjectId(bid) for bid in brand_id]
+#     product_ids_for_match = []
+#     if product_id:
+#         if isinstance(product_id, str):
+#             product_ids_for_match = [ObjectId(product_id)]
+#         elif isinstance(product_id, list):
+#             product_ids_for_match = [ObjectId(pid) for pid in product_id]
+#     if product_ids_for_match:
+#         ids_from_products = getOrdersListBasedonProductId(product_ids_for_match, start_date, end_date)
+#         if ids_from_products:
+#             match["_id"] = {"$in": ids_from_products}
+#         else:
+#             return {"results": {"items": []}}
+#     pipeline = [
+#         {"$match": match},
+#         {"$lookup": {
+#             "from": "order_items",
+#             "localField": "order_items",
+#             "foreignField": "_id",
+#             "as": "order_items_ins"
+#         }},
+#         {"$unwind": {
+#             "path": "$order_items_ins",
+#             "preserveNullAndEmptyArrays": True
+#         }},
+#         {"$lookup": {
+#             "from": "product",
+#             "localField": "order_items_ins.ProductDetails.product_id",
+#             "foreignField": "_id",
+#             "as": "product_ins"
+#         }},
+#         {"$unwind": {
+#             "path": "$product_ins",
+#             "preserveNullAndEmptyArrays": True
+#         }},
+#     ]
+#     if brand_ids_for_match:
+#         pipeline.append({
+#             "$match": {
+#                 "product_ins.brand_id": {"$in": brand_ids_for_match}
+#             }
+#         })
+#     pipeline.extend([
+#     {"$addFields": {
+#         "chart_key_raw": "$order_date",
+#         "chart_value": chart_value_field
+#     }},
+#     {"$group": {
+#         "_id": {
+#             "productId": "$product_ins._id",
+#             "timeBucket": {
+#                 "$dateToString": {
+#                     "format": chart_date_format,
+#                     "date": "$chart_key_raw",
+#                 }
+#             }
+#         },
+#         "productTitle": {"$first": "$product_ins.product_title"},
+#         "asin": {"$first": "$product_ins.product_id"},
+#         "sellerSku": {"$first": "$product_ins.sku"},
+#         "imageUrl": {"$first": "$product_ins.image_url"},
+#         "total_units_sum": {"$sum": "$order_items_ins.ProductDetails.QuantityOrdered"},
+#         "total_price_sum": {
+#             "$sum": {
+#                 "$multiply": [
+#                     "$order_items_ins.Pricing.ItemPrice.Amount",
+#                     "$order_items_ins.ProductDetails.QuantityOrdered"
+#                 ]
+#             }
+#         },
+#         "refund_qty_sum": {"$sum": "$order_items_ins.ProductDetails.QuantityShipped"},
+#         "hourly_or_daily_sale": {"$sum": "$chart_value"}
+#     }},
+#     {"$group": {
+#         "_id": "$_id.productId",
+#         "product": {
+#             "$first": {
+#                 "title": "$productTitle",
+#                 "asin": "$asin",
+#                 "sellerSku": "$sellerSku",
+#                 "imageUrl": "$imageUrl"
+#             }
+#         },
+#         "chart": {
+#             "$push": {
+#                 "k": "$_id.timeBucket",
+#                 "v": "$hourly_or_daily_sale"
+#             }
+#         },
+#         "total_units": {"$sum": "$total_units_sum"},
+#         "total_price": {"$sum": "$total_price_sum"},
+#         "refund_qty": {"$sum": "$refund_qty_sum"}
+#     }},
+#     {"$project": {
+#         "_id": 1,
+#         "product": 1,
+#         "chart": {
+#             "$arrayToObject": {
+#                 "$filter": {
+#                     "input": "$chart",
+#                     "as": "item",
+#                     "cond": {
+#                         "$and": [
+#                             {"$ne": ["$$item.k", None]},
+#                             {"$ne": ["$$item.v", None]},
+#                             {"$eq": [{"$type": "$$item.k"}, "string"]}
+#                         ]
+#                     }
+#                 }
+#             }
+#         },
+#         "total_units": 1,
+#         "total_price": 1,
+#         "refund_qty": 1
+#     }},
+#     {"$sort": SON([(sort_field, -1)])},
+#     {"$limit": 11}
+#     ])
+#     result = list(Order.objects.aggregate(pipeline))
+#     formatted_results = []
+#     for item in result:
+#         product_info = item.get("product") or {}
+#         chart = item.get("chart", {})
+#         chart = {str(k): float(v) for k, v in chart.items() if k and v is not None}
+#         product_dict = {}
+#         _id = item.get("_id")
+#         if _id:
+#             product_dict["id"] = str(_id)
+#         if product_info.get("title"):
+#             product_dict["product"] = product_info["title"]
+#         if product_info.get("asin"):
+#             product_dict["asin"] = product_info["asin"]
+#         if product_info.get("sellerSku"):
+#             product_dict["sku"] = product_info["sellerSku"]
+#         if product_info.get("imageUrl"):
+#             product_dict["product_image"] = product_info["imageUrl"]
+#         if item.get("total_units") is not None:
+#             product_dict["total_units"] = item["total_units"]
+#         if item.get("total_price"):
+#             product_dict["total_price"] = item["total_price"]
+#         if item.get("refund_qty"):
+#             product_dict["refund_qty"] = item["refund_qty"]
+#         if chart:
+#             product_dict["chart"] = chart
+#         title=product_dict.get('product',"").strip()
+#         if title:
+#             formatted_results.append(product_dict)
+#     data = {"results": {"items": formatted_results}}
+#     for item in formatted_results:
+#         if "chart" in item:
+#             if duration_hours <= 24:
+#                 end_date_str = end_date.strftime("%Y-%m-%d %H:00:00+00:00")
+#             else :
+#                 end_date_str = end_date.strftime("%Y-%m-%d 00:00:00+00:00")
+#             item["chart"] = {k: v for k, v in item["chart"].items() if k < end_date_str}
+#     return data
 
 @csrf_exempt
 def get_top_products(request):
+
+    print("\n" + "=" * 80)
+    print("GET TOP PRODUCTS START (SKU BASED FIX)")
+    print("=" * 80)
+
     json_request = JSONParser().parse(request)
-    marketplace_id = json_request.get('marketplace_id', None)
-    brand_id = json_request.get('brand_id', None)
-    product_id = json_request.get('product_id', None)
-    metric = json_request.get("sortBy", "units_sold")  
-    preset = json_request.get("preset", "Today")  
-    start_date_str = json_request.get("start_date", None)
-    end_date_str = json_request.get("end_date", None)
-    timezone_str = "US/Pacific"
+
+    marketplace_id = json_request.get("marketplace_id")
+    brand_id = json_request.get("brand_id") or []
+    product_id = json_request.get("product_id") or []  # kept for compatibility
+    metric = json_request.get("sortBy", "units_sold")
+    preset = json_request.get("preset")
+
+    start_date_str = json_request.get("start_date")
+    end_date_str = json_request.get("end_date")
+
+    print("marketplace_id =", marketplace_id)
+    print("brand_id =", brand_id)
+    print("product_id =", product_id)
+    print("metric =", metric)
+    print("preset =", preset)
+
+    from datetime import datetime, timedelta, timezone
+
+    # ==================================================
+    # DATE HANDLING
+    # ==================================================
     if start_date_str and end_date_str:
-        local_tz = pytz.timezone(timezone_str)
-        naive_from_date = datetime.strptime(start_date_str, '%Y-%m-%d')
-        naive_to_date = datetime.strptime(end_date_str, '%Y-%m-%d')
-        localized_from_date = local_tz.localize(naive_from_date)
-        localized_to_date = local_tz.localize(naive_to_date).replace(hour=23, minute=59, second=59)
-        start_date = localized_from_date.astimezone(pytz.UTC)
-        end_date = localized_to_date.astimezone(pytz.UTC)
+
+        print("USING CUSTOM DATE RANGE")
+
+        start_date = datetime.strptime(start_date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        end_date = datetime.strptime(end_date_str, "%Y-%m-%d").replace(
+            hour=23, minute=59, second=59, tzinfo=timezone.utc
+        )
+
     else:
-        start_date, end_date = get_date_range(preset, timezone_str)  
-    duration_hours = (end_date - start_date).total_seconds() / 3600
-    if duration_hours <= 24:
-        chart_date_format = "%Y-%m-%d %H:00:00+00:00"
+        print("USING PRESET DATE RANGE OR FALLBACK")
+
+        end_date = datetime.now(timezone.utc)
+        start_date = end_date - timedelta(days=90)
+
+    print("FINAL start_date =", start_date)
+    print("FINAL end_date =", end_date)
+
+    # ==================================================
+    # METRIC
+    # ==================================================
+    if metric == "price":
+        metric_expr = "sum(item_price * quantity)"
+    elif metric == "refund":
+        metric_expr = "sumIf(quantity, order_status = 'Refunded')"
     else:
-        chart_date_format = "%Y-%m-%d 00:00:00+00:00"
-    sort_field = {
-        "units_sold": "total_units",
-        "price": "total_price",
-        "refund": "refund_qty"
-    }.get(metric, "total_units")
-    chart_value_field = {
-        "units_sold": "$order_items_ins.ProductDetails.QuantityOrdered",
-        "price": {
-            "$multiply": [
-                "$order_items_ins.Pricing.ItemPrice.Amount",
-                "$order_items_ins.ProductDetails.QuantityOrdered"
-            ]
-        },
-        "refund": "$order_items_ins.ProductDetails.QuantityShipped"
-    }.get(metric, "$order_items_ins.ProductDetails.QuantityOrdered")
-    match = dict()
-    match['order_date'] = {"$gte": start_date, "$lt": end_date}
-    match['order_status'] = {"$in": ['Shipped', 'Delivered', 'Acknowledged', 'Pending', 'Unshipped', 'PartiallyShipped']}
+        metric_expr = "sum(quantity)"
+
+    # ==================================================
+    # CLICKHOUSE QUERY (SKU BASED)
+    # ==================================================
+    query = f"""
+    SELECT
+        sku,
+        any(product_id) AS product_id,
+
+        sum(quantity) AS total_units,
+        sum(item_price * quantity) AS total_price,
+        sumIf(quantity, order_status = 'Refunded') AS refund_qty,
+
+        {metric_expr} AS metric_value,
+
+        formatDateTime(order_date, '%Y-%m-%d 00:00:00') AS bucket
+
+    FROM fact_order_items
+
+    WHERE order_date >= toDateTime('{start_date.strftime('%Y-%m-%d %H:%M:%S')}')
+      AND order_date <= toDateTime('{end_date.strftime('%Y-%m-%d %H:%M:%S')}')
+      AND length(sku) > 0
+    """
+
+    # ==================================================
+    # FILTERS
+    # ==================================================
     if marketplace_id and marketplace_id not in ["all", "custom"]:
-        match['marketplace_id'] = ObjectId(marketplace_id)
-    if metric == "refund":
-        match['order_status'] = "Refunded"
-    brand_ids_for_match = []
+        query += f" AND marketplace_id = '{marketplace_id}'"
+
     if brand_id:
-        if isinstance(brand_id, str):
-            brand_ids_for_match = [ObjectId(brand_id)]
-        elif isinstance(brand_id, list):
-            brand_ids_for_match = [ObjectId(bid) for bid in brand_id]
-    product_ids_for_match = []
+        brand_values = ",".join([f"'{str(x)}'" for x in brand_id if x])
+        if brand_values:
+            query += f" AND brand_id IN ({brand_values})"
+
     if product_id:
-        if isinstance(product_id, str):
-            product_ids_for_match = [ObjectId(product_id)]
-        elif isinstance(product_id, list):
-            product_ids_for_match = [ObjectId(pid) for pid in product_id]
-    if product_ids_for_match:
-        ids_from_products = getOrdersListBasedonProductId(product_ids_for_match, start_date, end_date)
-        if ids_from_products:
-            match["_id"] = {"$in": ids_from_products}
-        else:
-            return {"results": {"items": []}}
-    pipeline = [
-        {"$match": match},
-        {"$lookup": {
-            "from": "order_items",
-            "localField": "order_items",
-            "foreignField": "_id",
-            "as": "order_items_ins"
-        }},
-        {"$unwind": {
-            "path": "$order_items_ins",
-            "preserveNullAndEmptyArrays": True
-        }},
-        {"$lookup": {
-            "from": "product",
-            "localField": "order_items_ins.ProductDetails.product_id",
-            "foreignField": "_id",
-            "as": "product_ins"
-        }},
-        {"$unwind": {
-            "path": "$product_ins",
-            "preserveNullAndEmptyArrays": True
-        }},
-    ]
-    if brand_ids_for_match:
-        pipeline.append({
-            "$match": {
-                "product_ins.brand_id": {"$in": brand_ids_for_match}
+        product_values = ",".join([f"'{str(x)}'" for x in product_id if x])
+        if product_values:
+            query += f" AND product_id IN ({product_values})"
+
+    query += """
+    GROUP BY sku, bucket
+    ORDER BY metric_value DESC
+    LIMIT 100
+    """
+
+    print("\nCLICKHOUSE QUERY")
+    print(query)
+
+    # ==================================================
+    # EXECUTE CLICKHOUSE
+    # ==================================================
+    rows = client.query(query).result_rows
+
+    print("\nCLICKHOUSE ROWS =", len(rows))
+
+    # ==================================================
+    # BUILD RESPONSE MAP (KEY = SKU)
+    # ==================================================
+    product_map = {}
+
+    for row in rows:
+
+        sku = str(row[0])
+        if not sku:
+            continue
+
+        if sku not in product_map:
+            product_map[sku] = {
+                "sku": sku,
+                "product_id": row[1],
+                "total_units": row[2] or 0,
+                "total_price": row[3] or 0,
+                "refund_qty": row[4] or 0,
+                "chart": {}
             }
-        })
-    pipeline.extend([
-    {"$addFields": {
-        "chart_key_raw": "$order_date",
-        "chart_value": chart_value_field
-    }},
-    {"$group": {
-        "_id": {
-            "productId": "$product_ins._id",
-            "timeBucket": {
-                "$dateToString": {
-                    "format": chart_date_format,
-                    "date": "$chart_key_raw",
-                }
-            }
-        },
-        "productTitle": {"$first": "$product_ins.product_title"},
-        "asin": {"$first": "$product_ins.product_id"},
-        "sellerSku": {"$first": "$product_ins.sku"},
-        "imageUrl": {"$first": "$product_ins.image_url"},
-        "total_units_sum": {"$sum": "$order_items_ins.ProductDetails.QuantityOrdered"},
-        "total_price_sum": {
-            "$sum": {
-                "$multiply": [
-                    "$order_items_ins.Pricing.ItemPrice.Amount",
-                    "$order_items_ins.ProductDetails.QuantityOrdered"
-                ]
-            }
-        },
-        "refund_qty_sum": {"$sum": "$order_items_ins.ProductDetails.QuantityShipped"},
-        "hourly_or_daily_sale": {"$sum": "$chart_value"}
-    }},
-    {"$group": {
-        "_id": "$_id.productId",
-        "product": {
-            "$first": {
-                "title": "$productTitle",
-                "asin": "$asin",
-                "sellerSku": "$sellerSku",
-                "imageUrl": "$imageUrl"
-            }
-        },
-        "chart": {
-            "$push": {
-                "k": "$_id.timeBucket",
-                "v": "$hourly_or_daily_sale"
-            }
-        },
-        "total_units": {"$sum": "$total_units_sum"},
-        "total_price": {"$sum": "$total_price_sum"},
-        "refund_qty": {"$sum": "$refund_qty_sum"}
-    }},
-    {"$project": {
-        "_id": 1,
-        "product": 1,
-        "chart": {
-            "$arrayToObject": {
-                "$filter": {
-                    "input": "$chart",
-                    "as": "item",
-                    "cond": {
-                        "$and": [
-                            {"$ne": ["$$item.k", None]},
-                            {"$ne": ["$$item.v", None]},
-                            {"$eq": [{"$type": "$$item.k"}, "string"]}
-                        ]
-                    }
-                }
-            }
-        },
-        "total_units": 1,
-        "total_price": 1,
-        "refund_qty": 1
-    }},
-    {"$sort": SON([(sort_field, -1)])},
-    {"$limit": 11}
-    ])
-    result = list(Order.objects.aggregate(pipeline))
-    formatted_results = []
-    for item in result:
-        product_info = item.get("product") or {}
-        chart = item.get("chart", {})
-        chart = {str(k): float(v) for k, v in chart.items() if k and v is not None}
-        product_dict = {}
-        _id = item.get("_id")
-        if _id:
-            product_dict["id"] = str(_id)
-        if product_info.get("title"):
-            product_dict["product"] = product_info["title"]
-        if product_info.get("asin"):
-            product_dict["asin"] = product_info["asin"]
-        if product_info.get("sellerSku"):
-            product_dict["sku"] = product_info["sellerSku"]
-        if product_info.get("imageUrl"):
-            product_dict["product_image"] = product_info["imageUrl"]
-        if item.get("total_units") is not None:
-            product_dict["total_units"] = item["total_units"]
-        if item.get("total_price"):
-            product_dict["total_price"] = item["total_price"]
-        if item.get("refund_qty"):
-            product_dict["refund_qty"] = item["refund_qty"]
-        if chart:
-            product_dict["chart"] = chart
-        title=product_dict.get('product',"").strip()
-        if title:
-            formatted_results.append(product_dict)
-    data = {"results": {"items": formatted_results}}
-    for item in formatted_results:
-        if "chart" in item:
-            if duration_hours <= 24:
-                end_date_str = end_date.strftime("%Y-%m-%d %H:00:00+00:00")
-            else :
-                end_date_str = end_date.strftime("%Y-%m-%d 00:00:00+00:00")
-            item["chart"] = {k: v for k, v in item["chart"].items() if k < end_date_str}
-    return data
+
+        product_map[sku]["chart"][row[6]] = float(row[5] or 0)
+
+    print("PRODUCTS FROM CH =", len(product_map))
+
+    # ==================================================
+    # MONGO ENRICHMENT (SKU BASED)
+    # ==================================================
+    sku_list = list(product_map.keys())
+
+    if sku_list:
+        try:
+            mongo_products = Product.objects.filter(sku__in=sku_list)
+
+            print("MONGO PRODUCTS FOUND =", mongo_products.count())
+
+            mongo_map = {str(p.sku): p for p in mongo_products}
+
+            for sku, item in product_map.items():
+
+                p = mongo_map.get(sku)
+                if not p:
+                    continue
+
+                item["product"] = item.get("product") or getattr(p, "product_title", "")
+                item["product_image"] = item.get("product_image") or getattr(p, "image_url", "")
+                item["asin"] = item.get("asin") or getattr(p, "product_id", "")
+
+        except Exception as e:
+            print("MONGO ERROR =", str(e))
+
+    # ==================================================
+    # FINAL RESPONSE
+    # ==================================================
+    formatted_results = list(product_map.values())
+
+    print("FINAL RESULT COUNT =", len(formatted_results))
+
+    return {
+        "results": {
+            "items": formatted_results
+        }
+    }
+
 def getPreviousDateRange(start_date, end_date):
     duration = end_date - start_date
     previous_start_date = start_date - duration - timedelta(days=1)
