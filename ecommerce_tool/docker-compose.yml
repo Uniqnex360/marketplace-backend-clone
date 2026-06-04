@@ -1,24 +1,22 @@
-version: '3.9'
+version: "3.9"
 
 services:
   app:
     build: .
-    # command: python manage.py runserver 0.0.0.0:8000
-    # command: gunicorn ecommerce_tool.wsgi:application --bind 0.0.0.0:8000 --workers 1 --timeout 60
     ports:
       - "8000:8000"
     volumes:
       - .:/app
     environment:
       - DEBUG=1
-      # - REDIS_HOST=redis
-      # - REDIS_PASSWORD=foobaredUniqnex
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
     env_file:
       - .env
     depends_on:
-      # - redis
       - clickhouse
-  
+      - redis
+
   clickhouse:
     image: clickhouse/clickhouse-server:latest
     ports:
@@ -29,28 +27,27 @@ services:
     volumes:
       - clickhouse_data:/var/lib/clickhouse
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  celery:
+    build: .
+    command: celery -A ecommerce_tool worker --loglevel=info
+    volumes:
+      - .:/app
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - app
+
 volumes:
   clickhouse_data:
-
-  # redis:
-  #   image: redis:7
-  #   command: ["redis-server", "--requirepass", "foobaredUniqnex"]
-  #   ports:
-  #     - "6379:6379"
-  #   volumes:
-  #     - redis_data:/data
-
-  # celery:
-  #   build: .
-  #   command: celery -A ecommerce_tool worker --loglevel=info
-  #   volumes:
-  #     - .:/app
-  #   environment:
-  #     - REDIS_HOST=redis
-  #     - REDIS_PASSWORD=foobaredUniqnex
-  #   depends_on:
-  #     - redis
-  #     - app
-
-# volumes:
-#   redis_data:
+  redis_data:

@@ -246,11 +246,6 @@ SELLERCLOUD_SERVER_ID = os.getenv(
 )  # Replace with your actual server ID
 SHIPSTATION_API_SECRET = os.getenv("SHIPSTATION_API_SECRET")
 SHIPSTATION_API_KEY = os.getenv("SHIPSTATION_API_KEY")
-# Celery Configuration
-CELERY_BROKER_URL = "redis://:foobaredUniqnex@127.0.0.1:6379/0"
-
-CELERY_ACCEPT_CONTENT = ["json"]
-CELERY_TASK_SERIALIZER = "json"
 
 #Clickhouse
 CLICKHOUSE_HOST=os.getenv("CLICKHOUSE_HOST")
@@ -258,6 +253,10 @@ CLICKHOUSE_PORT=os.getenv("CLICKHOUSE_PORT")
 CLICKHOUSE_DB=os.getenv("CLICKHOUSE_DB")
 CLICKHOUSE_USER=os.getenv("CLICKHOUSE_USER")
 CLICKHOUSE_PASSWORD=os.getenv("CLICKHOUSE_PASSWORD")
+
+#Redis
+CELERY_BROKER_URL = "redis://redis:6379/0"
+CELERY_RESULT_BACKEND = "redis://redis:6379/0"
 
 LOGGING = {
     "version": 1,
