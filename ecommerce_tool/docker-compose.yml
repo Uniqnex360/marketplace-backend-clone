@@ -24,6 +24,11 @@ services:
       - "9000:9000"
     env_file:
       - .env
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
     volumes:
       - clickhouse_data:/var/lib/clickhouse
 
@@ -43,9 +48,12 @@ services:
     env_file:
       - .env
     depends_on:
-      - redis
-      - app
-      - clickhouse
+      redis:
+        condition: service_started
+      app:
+        condition: service_started
+      clickhouse:
+        condition: service_healthy
 
 volumes:
   clickhouse_data:
