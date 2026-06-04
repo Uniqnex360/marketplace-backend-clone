@@ -45,6 +45,7 @@ services:
     depends_on:
       - redis
       - app
+      - clickhouse
 
 volumes:
   clickhouse_data:
