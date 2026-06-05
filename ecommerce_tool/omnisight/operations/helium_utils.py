@@ -31,6 +31,7 @@ def convertLocalTimeToUTC(start_date, end_date, timezone_str):
     start_date = start_date.astimezone(pytz.UTC)
     end_date = end_date.astimezone(pytz.UTC)
     return start_date, end_date
+
 def getOrdersListBasedonProductId(productIds,start_date=None, end_date=None):
     """
     Fetches the list of orders based on the provided product ID using a pipeline aggregation.
@@ -79,6 +80,7 @@ def getOrdersListBasedonProductId(productIds,start_date=None, end_date=None):
     if orders != []:
         orders = orders[0]['orderIds']
     return orders
+
 def getproductIdListBasedonbrand(brandIds,start_date=None, end_date=None):
     """
     Fetches the list of product IDs based on the provided brand ID using a pipeline aggregation.
@@ -111,6 +113,7 @@ def getproductIdListBasedonbrand(brandIds,start_date=None, end_date=None):
     if products != []:
         orders = getOrdersListBasedonProductId(products[0]['productIds'],start_date, end_date)
     return orders
+
 def getproductIdListBasedonManufacture(manufactureName = [],start_date=None, end_date=None):
     """
     Fetches the list of product IDs based on the provided brand ID using a pipeline aggregation.

@@ -1470,64 +1470,222 @@ def totalSalesAmount(request):
     return data
 
 
+# @csrf_exempt
+# def salesAnalytics(request):
+#     try:
+#         data = dict()
+#         json_request = JSONParser().parse(request)
+#         marketplace_id = json_request.get("marketplace_id", "all")
+#         start_date = json_request.get("start_date")
+#         end_date = json_request.get("end_date")
+#         timezone_str = json_request.get("timezone", "US/Pacific")
+#         brand_id_list = json_request.get("brand_id")
+#         preset = json_request.get("preset", "Today")
+#         product_id_list = json_request.get("product_id")
+#         if start_date and start_date != "":
+#             if isinstance(start_date, datetime):
+#                 start_date = start_date.isoformat()
+#             if isinstance(end_date, datetime):
+#                 end_date = end_date.isoformat()
+#             start_date, end_date = convertdateTotimezone(
+#                 start_date, end_date, timezone_str
+#             )
+#         else:
+#             start_date, end_date = get_date_range(preset, timezone_str)
+#         orders = grossRevenue(
+#             start_date,
+#             end_date,
+#             marketplace_id=marketplace_id,
+#             brand_id=brand_id_list,
+#             timezone=timezone_str,
+#             product_id=product_id_list,
+#         )
+#         orders = [
+#             o
+#             for o in orders
+#             if o.get("order_status") not in ["Cancelled", "Canceled"]
+#             and o.get("order_total", 0) > 0
+#         ]
+#         data["total_sales"] = sum(o["original_order_total"] for o in orders)
+#         order_days = defaultdict(lambda: {"order_count": 0, "order_value": 0.0})
+#         for o in orders:
+#             order_date = o["order_date"]
+#             if isinstance(order_date, str):
+#                 order_date = datetime.fromisoformat(order_date)
+#             date_key = order_date.strftime("%Y-%m-%d")
+#             order_days[date_key]["order_count"] += 1
+#             order_days[date_key]["order_value"] += o["order_total"]
+#         data["order_days"] = [
+#             {
+#                 "date": k,
+#                 "order_count": v["order_count"],
+#                 "order_value": v["order_value"],
+#             }
+#             for k, v in sorted(order_days.items())
+#         ]
+#         sanitized_data = sanitize_floats(data)
+#         return sanitized_data
+#     except Exception as e:
+#         return {"error": str(e)}
+
+
+from clickhouse.config import client
+
+
 @csrf_exempt
 def salesAnalytics(request):
     try:
-        data = dict()
+        data = {}
+
         json_request = JSONParser().parse(request)
+
         marketplace_id = json_request.get("marketplace_id", "all")
         start_date = json_request.get("start_date")
         end_date = json_request.get("end_date")
         timezone_str = json_request.get("timezone", "US/Pacific")
         brand_id_list = json_request.get("brand_id")
+        sku_list = json_request.get("sku", [])
+        manufacturer_name = json_request.get("manufacturer_name", [])
+        fulfillment_channel = json_request.get("fulfillment_channel")
         preset = json_request.get("preset", "Today")
-        product_id_list = json_request.get("product_id")
+
+        # ---------------------------------
+        # DATE RANGE
+        # ---------------------------------
         if start_date and start_date != "":
             if isinstance(start_date, datetime):
                 start_date = start_date.isoformat()
+
             if isinstance(end_date, datetime):
                 end_date = end_date.isoformat()
+
             start_date, end_date = convertdateTotimezone(
-                start_date, end_date, timezone_str
+                start_date,
+                end_date,
+                timezone_str,
             )
         else:
-            start_date, end_date = get_date_range(preset, timezone_str)
-        orders = grossRevenue(
-            start_date,
-            end_date,
-            marketplace_id=marketplace_id,
-            brand_id=brand_id_list,
-            timezone=timezone_str,
-            product_id=product_id_list,
-        )
-        orders = [
-            o
-            for o in orders
-            if o.get("order_status") not in ["Cancelled", "Canceled"]
-            and o.get("order_total", 0) > 0
-        ]
-        data["total_sales"] = sum(o["original_order_total"] for o in orders)
-        order_days = defaultdict(lambda: {"order_count": 0, "order_value": 0.0})
-        for o in orders:
-            order_date = o["order_date"]
-            if isinstance(order_date, str):
-                order_date = datetime.fromisoformat(order_date)
-            date_key = order_date.strftime("%Y-%m-%d")
-            order_days[date_key]["order_count"] += 1
-            order_days[date_key]["order_value"] += o["order_total"]
-        data["order_days"] = [
-            {
-                "date": k,
-                "order_count": v["order_count"],
-                "order_value": v["order_value"],
-            }
-            for k, v in sorted(order_days.items())
-        ]
-        sanitized_data = sanitize_floats(data)
-        return sanitized_data
-    except Exception as e:
-        return {"error": str(e)}
+            start_date, end_date = get_date_range(
+                preset,
+                timezone_str,
+            )
 
+        # ---------------------------------
+        # CLICKHOUSE FILTERS
+        # ---------------------------------
+        where_conditions = [
+            "order_date >= %(start_date)s",
+            "order_date <= %(end_date)s",
+            "order_status NOT IN ('Canceled','Cancelled')",
+            "order_total > 0",
+        ]
+
+        params = {
+            "start_date": start_date,
+            "end_date": end_date,
+        }
+
+        if marketplace_id not in [None, "", "all", "custom"]:
+            where_conditions.append(
+                "marketplace_id = %(marketplace_id)s"
+            )
+            params["marketplace_id"] = str(marketplace_id)
+
+        if fulfillment_channel:
+            where_conditions.append(
+                "fulfillment_channel = %(fulfillment_channel)s"
+            )
+            params["fulfillment_channel"] = fulfillment_channel
+
+        if brand_id_list not in [None, "", []]:
+            where_conditions.append(
+                "brand_id IN %(brand_ids)s"
+            )
+            params["brand_ids"] = tuple(
+                [str(x) for x in brand_id_list]
+            )
+
+        if sku_list:
+            where_conditions.append(
+                "sku IN %(sku_list)s"
+            )
+            params["sku_list"] = tuple(sku_list)
+
+        # ---------------------------------
+        # MONGO FALLBACK
+        # Only if field not present in CH
+        # ---------------------------------
+        if manufacturer_name not in [None, "", []]:
+
+            product_skus = list(
+                Product.objects.filter(
+                    manufacturer_name__in=manufacturer_name
+                ).values_list(
+                    "sku",
+                    flat=True,
+                )
+            )
+
+            if not product_skus:
+                return {
+                    "total_sales": 0,
+                    "order_days": [],
+                }
+
+            where_conditions.append(
+                "sku IN %(manufacturer_skus)s"
+            )
+
+            params["manufacturer_skus"] = tuple(product_skus)
+
+        # ---------------------------------
+        # QUERY CLICKHOUSE
+        # ---------------------------------
+        query = f"""
+        SELECT
+            order_date_day,
+            countDistinct(order_id) AS order_count,
+            sum(order_total) AS order_value,
+            sum(item_price) AS total_sales
+        FROM fact_order_items
+        WHERE {' AND '.join(where_conditions)}
+        GROUP BY order_date_day
+        ORDER BY order_date_day
+        """
+
+        rows = client.query(
+            query,
+            parameters=params,
+        ).result_rows
+
+        # ---------------------------------
+        # RESPONSE FORMAT
+        # ---------------------------------
+        total_sales = 0
+        order_days = []
+
+        for row in rows:
+            order_date_day, order_count, order_value, sales = row
+
+            total_sales += float(sales or 0)
+
+            order_days.append(
+                {
+                    "date": order_date_day.strftime("%Y-%m-%d"),
+                    "order_count": int(order_count),
+                    "order_value": float(order_value or 0),
+                }
+            )
+
+        data["total_sales"] = round(total_sales, 2)
+        data["order_days"] = order_days
+
+        return sanitize_floats(data)
+
+    except Exception as e:
+        return {
+            "error": str(e)
+        }
 
 @csrf_exempt
 def mostSellingProducts(request):

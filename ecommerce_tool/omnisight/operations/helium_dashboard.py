@@ -651,149 +651,351 @@ def get_metrics_by_date_range(request):
     return sanitize_data(metrics)
 
 
+# @csrf_exempt
+# def LatestOrdersTodayAPIView(request):
+#     json_request = JSONParser().parse(request)
+#     marketplace_id = json_request.get('marketplace_id', None)
+#     product_id = json_request.get('product_id', [])
+#     brand_id = json_request.get('brand_id', [])
+#     manufacturer_name = json_request.get('manufacturer_name', [])
+#     fulfillment_channel = json_request.get('fulfillment_channel', None)
+#     pacific = pytz.timezone("US/Pacific")
+#     utc = pytz.UTC
+#     now_pacific = datetime.now(pacific)
+#     start_of_day_pacific = now_pacific.replace(hour=0, minute=0, second=0, microsecond=0)
+#     end_of_day_pacific = now_pacific.replace(hour=23, minute=59, second=59, microsecond=999999)
+#     start_of_day_utc = start_of_day_pacific.astimezone(utc)
+#     end_of_day_utc = end_of_day_pacific.astimezone(utc)
+#     match = dict()
+#     match['order_date'] = {"$gte": start_of_day_utc, "$lte": end_of_day_utc}
+#     match['order_status'] = {"$in": ['Shipped', 'Delivered','Acknowledged','Pending','Unshipped','PartiallyShipped']}
+#     if fulfillment_channel:
+#         match['fulfillment_channel'] = fulfillment_channel
+#     if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
+#         match['marketplace_id'] = ObjectId(marketplace_id)
+#     if manufacturer_name != None and manufacturer_name != "" and manufacturer_name != []:
+#         ids = getproductIdListBasedonManufacture(manufacturer_name, start_of_day_utc, end_of_day_utc)
+#         match["_id"] = {"$in": ids}
+#     elif product_id != None and product_id != "" and product_id != []:
+#         product_id = [ObjectId(pid) for pid in product_id]
+#         ids = getOrdersListBasedonProductId(product_id, start_of_day_utc, end_of_day_utc)
+#         match["_id"] = {"$in": ids}
+#     elif brand_id != None and brand_id != "" and brand_id != []:
+#         brand_id = [ObjectId(bid) for bid in brand_id]
+#         ids = getproductIdListBasedonbrand(brand_id, start_of_day_utc, end_of_day_utc)
+#         match["_id"] = {"$in": ids}
+#     pipeline = [
+#         {
+#             "$match": match
+#         },
+#         {
+#             "$sort": {"order_date": -1}  
+#         },
+#         {
+#             "$project": {
+#                 "_id" : 1,
+#                 "order_date": 1,
+#                 "order_items": 1
+#             }
+#         }
+#     ]
+#     qs = list(Order.objects.aggregate(*pipeline))
+#     chart = OrderedDict()
+#     bucket = start_of_day_pacific.replace(minute=0, second=0, microsecond=0)
+#     for _ in range(24):  
+#         key = bucket.strftime("%Y-%m-%d %H:00:00")
+#         chart[key] = {"ordersCount": 0, "unitsCount": 0}
+#         bucket += timedelta(hours=1)
+#     orders_out = []
+#     for order in qs:
+#         order_utc_time = order.get('order_date')
+#         if isinstance(order_utc_time, datetime):
+#             if order_utc_time.tzinfo is None:
+#                 order_utc_time = utc.localize(order_utc_time)
+#             order_pacific_time = order_utc_time.astimezone(pacific)
+#             bk = order_pacific_time.replace(minute=0, second=0, microsecond=0).strftime("%Y-%m-%d %H:00:00")
+#         else:
+#             raise TypeError("'order_date' must be a datetime object")
+#         if bk in chart:
+#             chart[bk]["ordersCount"] += 1
+#             try:
+#                 item_pipeline = [
+#                     {"$match": {"_id": {"$in": order['order_items']}}},
+#                     {
+#                         "$lookup": {
+#                             "from": "product",
+#                             "localField": "ProductDetails.product_id",
+#                             "foreignField": "_id",
+#                             "as": "product_ins"
+#                         }
+#                     },
+#                     {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
+#                     {
+#                         "$group": {
+#                             "_id": {
+#                                 "id" : "$product_ins._id",
+#                                 "sku": {"$ifNull": ["$product_ins.sku", ""]},
+#                                 "asin": {"$ifNull": ["$product_ins.product_id", ""]},
+#                                 "title": "$product_ins.product_title",
+#                                 "imageUrl": "$product_ins.image_url",
+#                                 "purchaseDate": order_pacific_time  
+#                             },
+#                             "quantityOrdered": {"$sum": "$ProductDetails.QuantityOrdered"},
+#                             "unitPrice": {"$first": "$Pricing.ItemPrice.Amount"},
+#                             "Platform" : {"$first": "$Platform"},
+#                         }
+#                     },
+#                     {
+#                         "$project": {
+#                             "_id": 0,
+#                             "id" : "$_id.id",
+#                             "sku": "$_id.sku",
+#                             "asin": "$_id.asin",
+#                             "title": "$_id.title",
+#                             "imageUrl": "$_id.imageUrl",
+#                             "quantityOrdered": "$quantityOrdered",
+#                             "unitPrice": "$unitPrice",
+#                             "Platform" : "$Platform",
+#                             "purchaseDate": "$_id.purchaseDate"
+#                         }
+#                     }
+#                 ]
+#                 item_results = list(OrderItems.objects.aggregate(*item_pipeline))
+#                 for item in item_results:
+#                     try:
+#                         if item["Platform"] == "Walmart":
+#                             price = item["unitPrice"] * item['quantityOrdered']
+#                         elif item["Platform"] == "Amazon":
+#                             price = item["unitPrice"]
+#                         else:
+#                             price = item["unitPrice"]
+#                     except:
+#                         price = 0
+#                     orders_out.append({
+#                         "id" : str(item["id"]),
+#                         "sellerSku": item["sku"],
+#                         "asin": item["asin"],
+#                         "title": item["title"],
+#                         "quantityOrdered": item["quantityOrdered"],
+#                         "imageUrl": item["imageUrl"],
+#                         "price": price,
+#                         "purchaseDate": order_pacific_time.strftime("%Y-%m-%d %H:%M:%S"),  
+#                         "purchaseDatetime": order_pacific_time  
+#                     })
+#                     chart[bk]["unitsCount"] += item["quantityOrdered"]
+#             except Exception as e:
+#                 continue
+#     orders_out.sort(key=lambda o: o["purchaseDatetime"], reverse=True)
+#     for order in orders_out:
+#         order.pop("purchaseDatetime", None)
+#     chart_list = [{"hour": hour, **data} for hour, data in chart.items()]
+#     data = {
+#         "orders": orders_out,
+#         "hourly_order_count": chart_list
+#     }
+#     return data
+
+
+
 @csrf_exempt
 def LatestOrdersTodayAPIView(request):
-    json_request = JSONParser().parse(request)
-    marketplace_id = json_request.get('marketplace_id', None)
-    product_id = json_request.get('product_id', [])
-    brand_id = json_request.get('brand_id', [])
-    manufacturer_name = json_request.get('manufacturer_name', [])
-    fulfillment_channel = json_request.get('fulfillment_channel', None)
-    pacific = pytz.timezone("US/Pacific")
-    utc = pytz.UTC
-    now_pacific = datetime.now(pacific)
-    start_of_day_pacific = now_pacific.replace(hour=0, minute=0, second=0, microsecond=0)
-    end_of_day_pacific = now_pacific.replace(hour=23, minute=59, second=59, microsecond=999999)
-    start_of_day_utc = start_of_day_pacific.astimezone(utc)
-    end_of_day_utc = end_of_day_pacific.astimezone(utc)
-    match = dict()
-    match['order_date'] = {"$gte": start_of_day_utc, "$lte": end_of_day_utc}
-    match['order_status'] = {"$in": ['Shipped', 'Delivered','Acknowledged','Pending','Unshipped','PartiallyShipped']}
-    if fulfillment_channel:
-        match['fulfillment_channel'] = fulfillment_channel
-    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
-        match['marketplace_id'] = ObjectId(marketplace_id)
-    if manufacturer_name != None and manufacturer_name != "" and manufacturer_name != []:
-        ids = getproductIdListBasedonManufacture(manufacturer_name, start_of_day_utc, end_of_day_utc)
-        match["_id"] = {"$in": ids}
-    elif product_id != None and product_id != "" and product_id != []:
-        product_id = [ObjectId(pid) for pid in product_id]
-        ids = getOrdersListBasedonProductId(product_id, start_of_day_utc, end_of_day_utc)
-        match["_id"] = {"$in": ids}
-    elif brand_id != None and brand_id != "" and brand_id != []:
-        brand_id = [ObjectId(bid) for bid in brand_id]
-        ids = getproductIdListBasedonbrand(brand_id, start_of_day_utc, end_of_day_utc)
-        match["_id"] = {"$in": ids}
-    pipeline = [
-        {
-            "$match": match
-        },
-        {
-            "$sort": {"order_date": -1}  
-        },
-        {
-            "$project": {
-                "_id" : 1,
-                "order_date": 1,
-                "order_items": 1
+    try:
+        json_request = JSONParser().parse(request)
+
+        marketplace_id = json_request.get("marketplace_id")
+        brand_id = json_request.get("brand_id", [])
+        manufacturer_name = json_request.get("manufacturer_name", [])
+        fulfillment_channel = json_request.get("fulfillment_channel")
+
+        pacific = pytz.timezone("US/Pacific")
+        utc = pytz.UTC
+
+        # --------------------------------------------------
+        # STEP 1: GET LATEST AVAILABLE DATA TIME (IMPORTANT)
+        # --------------------------------------------------
+        latest_order_date = client.query("""
+            SELECT max(order_date)
+            FROM fact_order_items
+        """).result_rows[0][0]
+
+        if not latest_order_date:
+            return {
+                "orders": [],
+                "hourly_order_count": []
             }
+
+        # --------------------------------------------------
+        # STEP 2: DEFINE ROLLING 24H WINDOW BASED ON DATA
+        # --------------------------------------------------
+        end_of_day_utc = latest_order_date
+        start_of_day_utc = latest_order_date - timedelta(hours=24)
+
+        # convert for charting (Pacific)
+        end_pacific = utc.localize(end_of_day_utc).astimezone(pacific)
+        start_pacific = end_pacific - timedelta(hours=23)
+
+        # --------------------------------------------------
+        # CLICKHOUSE FILTERS
+        # --------------------------------------------------
+        where_conditions = [
+            "order_date >= %(start_date)s",
+            "order_date <= %(end_date)s",
+            """order_status IN (
+                'Shipped',
+                'Delivered',
+                'Acknowledged',
+                'Pending',
+                'Unshipped',
+                'PartiallyShipped'
+            )"""
+        ]
+
+        params = {
+            "start_date": start_of_day_utc,
+            "end_date": end_of_day_utc,
         }
-    ]
-    qs = list(Order.objects.aggregate(*pipeline))
-    chart = OrderedDict()
-    bucket = start_of_day_pacific.replace(minute=0, second=0, microsecond=0)
-    for _ in range(24):  
-        key = bucket.strftime("%Y-%m-%d %H:00:00")
-        chart[key] = {"ordersCount": 0, "unitsCount": 0}
-        bucket += timedelta(hours=1)
-    orders_out = []
-    for order in qs:
-        order_utc_time = order.get('order_date')
-        if isinstance(order_utc_time, datetime):
-            if order_utc_time.tzinfo is None:
-                order_utc_time = utc.localize(order_utc_time)
-            order_pacific_time = order_utc_time.astimezone(pacific)
-            bk = order_pacific_time.replace(minute=0, second=0, microsecond=0).strftime("%Y-%m-%d %H:00:00")
-        else:
-            raise TypeError("'order_date' must be a datetime object")
-        if bk in chart:
-            chart[bk]["ordersCount"] += 1
-            try:
-                item_pipeline = [
-                    {"$match": {"_id": {"$in": order['order_items']}}},
-                    {
-                        "$lookup": {
-                            "from": "product",
-                            "localField": "ProductDetails.product_id",
-                            "foreignField": "_id",
-                            "as": "product_ins"
-                        }
-                    },
-                    {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
-                    {
-                        "$group": {
-                            "_id": {
-                                "id" : "$product_ins._id",
-                                "sku": {"$ifNull": ["$product_ins.sku", ""]},
-                                "asin": {"$ifNull": ["$product_ins.product_id", ""]},
-                                "title": "$product_ins.product_title",
-                                "imageUrl": "$product_ins.image_url",
-                                "purchaseDate": order_pacific_time  
-                            },
-                            "quantityOrdered": {"$sum": "$ProductDetails.QuantityOrdered"},
-                            "unitPrice": {"$first": "$Pricing.ItemPrice.Amount"},
-                            "Platform" : {"$first": "$Platform"},
-                        }
-                    },
-                    {
-                        "$project": {
-                            "_id": 0,
-                            "id" : "$_id.id",
-                            "sku": "$_id.sku",
-                            "asin": "$_id.asin",
-                            "title": "$_id.title",
-                            "imageUrl": "$_id.imageUrl",
-                            "quantityOrdered": "$quantityOrdered",
-                            "unitPrice": "$unitPrice",
-                            "Platform" : "$Platform",
-                            "purchaseDate": "$_id.purchaseDate"
-                        }
-                    }
-                ]
-                item_results = list(OrderItems.objects.aggregate(*item_pipeline))
-                for item in item_results:
-                    try:
-                        if item["Platform"] == "Walmart":
-                            price = item["unitPrice"] * item['quantityOrdered']
-                        elif item["Platform"] == "Amazon":
-                            price = item["unitPrice"]
-                        else:
-                            price = item["unitPrice"]
-                    except:
-                        price = 0
-                    orders_out.append({
-                        "id" : str(item["id"]),
-                        "sellerSku": item["sku"],
-                        "asin": item["asin"],
-                        "title": item["title"],
-                        "quantityOrdered": item["quantityOrdered"],
-                        "imageUrl": item["imageUrl"],
-                        "price": price,
-                        "purchaseDate": order_pacific_time.strftime("%Y-%m-%d %H:%M:%S"),  
-                        "purchaseDatetime": order_pacific_time  
-                    })
-                    chart[bk]["unitsCount"] += item["quantityOrdered"]
-            except Exception as e:
-                continue
-    orders_out.sort(key=lambda o: o["purchaseDatetime"], reverse=True)
-    for order in orders_out:
-        order.pop("purchaseDatetime", None)
-    chart_list = [{"hour": hour, **data} for hour, data in chart.items()]
-    data = {
-        "orders": orders_out,
-        "hourly_order_count": chart_list
-    }
-    return data
+
+        if marketplace_id not in [None, "", "all", "custom"]:
+            where_conditions.append("marketplace_id = %(marketplace_id)s")
+            params["marketplace_id"] = str(marketplace_id)
+
+        if fulfillment_channel:
+            where_conditions.append("fulfillment_channel = %(fulfillment_channel)s")
+            params["fulfillment_channel"] = fulfillment_channel
+
+        if brand_id not in [None, "", []]:
+            where_conditions.append("brand_id IN %(brand_ids)s")
+            params["brand_ids"] = tuple([str(x) for x in brand_id])
+
+        if manufacturer_name not in [None, "", []]:
+            where_conditions.append("manufacturer_name IN %(manufacturer_names)s")
+            params["manufacturer_names"] = tuple(manufacturer_name)
+
+        # --------------------------------------------------
+        # CLICKHOUSE QUERY
+        # --------------------------------------------------
+        query = f"""
+        SELECT
+            order_id,
+            sku,
+            product_id,
+            quantity,
+            item_price,
+            marketplace_name,
+            order_date
+        FROM fact_order_items
+        WHERE {' AND '.join(where_conditions)}
+        ORDER BY order_date DESC
+        """
+
+        rows = client.query(query, parameters=params).result_rows
+
+        # --------------------------------------------------
+        # SKU LOOKUP (Mongo fallback for missing fields)
+        # --------------------------------------------------
+        sku_list = list({r[1] for r in rows if r[1]})
+
+        product_lookup = {}
+
+        if sku_list:
+            products = Product.objects.filter(sku__in=sku_list).only(
+                "sku",
+                "product_title",
+                "image_url",
+                "product_id"
+            )
+
+            product_lookup = {
+                p.sku: {
+                    "title": getattr(p, "product_title", ""),
+                    "imageUrl": getattr(p, "image_url", ""),
+                    "asin": str(getattr(p, "product_id", ""))
+                }
+                for p in products
+            }
+
+        # --------------------------------------------------
+        # HOURLY CHART (BASED ON LATEST DATA WINDOW)
+        # --------------------------------------------------
+        chart = OrderedDict()
+
+        bucket = start_pacific.replace(minute=0, second=0, microsecond=0)
+
+        for _ in range(24):
+            key = bucket.strftime("%Y-%m-%d %H:00:00")
+            chart[key] = {
+                "ordersCount": 0,
+                "unitsCount": 0
+            }
+            bucket += timedelta(hours=1)
+
+        # --------------------------------------------------
+        # BUILD RESPONSE
+        # --------------------------------------------------
+        orders_out = []
+        seen_orders = set()
+
+        for row in rows:
+            (
+                order_id,
+                sku,
+                product_id,
+                quantity,
+                item_price,
+                platform,
+                order_date
+            ) = row
+
+            order_utc = utc.localize(order_date)
+            order_pacific = order_utc.astimezone(pacific)
+
+            hour_bucket = order_pacific.replace(
+                minute=0,
+                second=0,
+                microsecond=0
+            ).strftime("%Y-%m-%d %H:00:00")
+
+            if hour_bucket in chart:
+
+                if order_id not in seen_orders:
+                    chart[hour_bucket]["ordersCount"] += 1
+                    seen_orders.add(order_id)
+
+                chart[hour_bucket]["unitsCount"] += quantity or 0
+
+            product_info = product_lookup.get(sku, {})
+
+            orders_out.append({
+                "id": str(product_id),
+                "sellerSku": sku,
+                "asin": product_info.get("asin", ""),
+                "title": product_info.get("title", ""),
+                "quantityOrdered": int(quantity or 0),
+                "imageUrl": product_info.get("imageUrl", ""),
+                "price": float(item_price or 0),
+                "purchaseDate": order_pacific.strftime("%Y-%m-%d %H:%M:%S"),
+                "purchaseDatetime": order_pacific
+            })
+
+        orders_out.sort(key=lambda x: x["purchaseDatetime"], reverse=True)
+
+        for o in orders_out:
+            o.pop("purchaseDatetime", None)
+
+        chart_list = [
+            {"hour": h, **v}
+            for h, v in chart.items()
+        ]
+
+        return {
+            "orders": orders_out,
+            "hourly_order_count": chart_list
+        }
+
+    except Exception as e:
+        return {"error": str(e)}
+    
+    
 @csrf_exempt
 def RevenueWidgetAPIView(request):
     json_request = JSONParser().parse(request)
