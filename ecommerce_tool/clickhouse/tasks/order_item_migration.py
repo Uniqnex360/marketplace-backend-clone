@@ -98,10 +98,41 @@ def migrate_mongo_order_item_to_clickhouse_task():
             {"_id": 1, "Pricing": 1, "ProductDetails": 1},
         )
 
+    # order_cursor = (
+    #     Order._get_collection()
+    #     .find(
+    #         {},
+    #         {
+    #             "_id": 1,
+    #             "order_items": 1,
+    #             "order_date": 1,
+    #             "purchase_order_id": 1,
+    #             "marketplace_id": 1,
+    #             "geo": 1,
+    #             "channel": 1,
+    #             "fulfillment_channel": 1,
+    #             "order_status": 1,
+    #             "order_total": 1,
+    #             "currency": 1,
+    #         },
+    #     )
+    #     .batch_size(ORDER_BATCH)
+    # )
+
+    from datetime import datetime
+
+    start_date = datetime(2026, 5, 10)
+    end_date = datetime(2026, 5, 13)  # exclusive
+
     order_cursor = (
         Order._get_collection()
         .find(
-            {},
+            {
+                "order_date": {
+                    "$gte": start_date,
+                    "$lt": end_date,
+                }
+            },
             {
                 "_id": 1,
                 "order_items": 1,

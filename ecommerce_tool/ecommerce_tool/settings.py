@@ -157,6 +157,9 @@ WSGI_APPLICATION = "ecommerce_tool.wsgi.application"
 # MongoDB connection settings for mongoengine
 from mongoengine import connect
 
+
+DATABASE_HOST = os.getenv("DATABASE_HOST")
+
 connect(
     db=os.getenv("DATABASE_NAME"),
     # username=os.getenv('DATABASE_USER'),
