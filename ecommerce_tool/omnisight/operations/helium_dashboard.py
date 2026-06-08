@@ -5630,6 +5630,7 @@ def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,ma
 
 from clickhouse.config import client
 
+
 @csrf_exempt
 def getProfitAndLossDetails(request):
     import time
@@ -5646,9 +5647,6 @@ def getProfitAndLossDetails(request):
 
     json_request = JSONParser().parse(request)
 
-    print("\n\n================ REQUEST START ================")
-    debug("RAW_REQUEST", json_request)
-
     marketplace_id = json_request.get('marketplace_id')
     brand_id = json_request.get('brand_id', [])
     product_id = json_request.get('product_id', [])
@@ -5660,45 +5658,20 @@ def getProfitAndLossDetails(request):
     start_date = json_request.get("start_date")
     end_date = json_request.get("end_date")
 
-    debug("marketplace_id", marketplace_id)
-    debug("brand_id", brand_id)
-    debug("product_id", product_id)
-    debug("manufacturer_name", manufacturer_name)
-    debug("fulfillment_channel", fulfillment_channel)
-    debug("preset", preset)
-
     # ---------------- DATE RANGE ----------------
-    t = time.time()
-
     if start_date:
         from_date, to_date = convertdateTotimezone(start_date, end_date, timezone)
     else:
         from_date, to_date = get_date_range(preset, timezone)
 
-    debug("from_date", from_date)
-    debug("to_date", to_date)
-
-    log("date_range", t)
-
     duration = to_date - from_date
     prev_from = from_date - duration
     prev_to = to_date - duration
 
-    debug("prev_from", prev_from)
-    debug("prev_to", prev_to)
-
-    # ---------------- CLICKHOUSE CORE QUERY ----------------
+    # ---------------- CLICKHOUSE ----------------
     def fetch_metrics(start, end):
-        t_call = time.time()
-
-        debug("QUERY_RANGE_START", start)
-        debug("QUERY_RANGE_END", end)
-
         filters = []
-        params = {
-            "start": start,
-            "end": end
-        }
+        params = {"start": start, "end": end}
 
         if marketplace_id and marketplace_id != "all":
             filters.append("marketplace_id = %(marketplace_id)s")
@@ -5729,7 +5702,7 @@ def getProfitAndLossDetails(request):
             sum(order_total) as gross,
             sum(shipping_price) as shipping,
             sum(item_tax) as tax,
-            sum(item_price * quantity) as temp_price,
+            sum(item_price * quantity) as revenue,
 
             sum(product_cost * quantity) as cogs,
             sum(vendor_funding * quantity) as vendor_funding,
@@ -5740,60 +5713,46 @@ def getProfitAndLossDetails(request):
 
             sum(referral_fee * quantity) as channel_fee,
             sum(quantity) as units,
-
             uniqExact(sku) as sku_count
         FROM fact_order_items
         WHERE order_date BETWEEN %(start)s AND %(end)s
         {where_clause}
         """
 
-        debug("FINAL_QUERY", query)
-        debug("PARAMS", params)
-
         result = client.query(query, params).result_rows
+        row = result[0] if result else (0,) * 12
 
-        debug("RAW_RESULT", result)
+        gross = float(row[0] or 0)
+        shipping = float(row[1] or 0)
+        tax = float(row[2] or 0)
+        revenue = float(row[3] or 0)
 
-        row = result[0] if result else (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+        cogs = float(row[4] or 0)
+        vendor_funding = float(row[5] or 0)
+        vendor_discount = float(row[6] or 0)
 
-        debug("ROW_USED", row)
+        promo = float(row[7] or 0)
+        ship_promo = float(row[8] or 0)
+        channel_fee = float(row[9] or 0)
 
-        log("clickhouse_query", t_call)
+        units = int(row[10] or 0)
+        sku_count = int(row[11] or 0)
 
-        gross = row[0] or 0
-        shipping = row[1] or 0
-        tax = row[2] or 0
-        temp_price = row[3] or 0
-
-        cogs = row[4] or 0
-        vendor_funding = row[5] or 0
-        vendor_discount = row[6] or 0
-
-        promo = row[7] or 0
-        ship_promo = row[8] or 0
-        channel_fee = row[9] or 0
-
-        units = row[10] or 0
-        sku_count = row[11] or 0
-
-        expenses = cogs + channel_fee
+        expenses = cogs + channel_fee + vendor_discount + ship_promo
 
         net_profit = (
-            temp_price +
-            shipping +
-            promo +
-            vendor_funding -
-            (channel_fee + cogs + vendor_discount + ship_promo)
+            revenue
+            + shipping
+            + promo
+            + vendor_funding
+            - expenses
         )
 
         margin = (net_profit / gross) * 100 if gross else 0
         roi = (net_profit / expenses) * 100 if expenses else 0
 
-        debug("gross", gross)
-        debug("net_profit", net_profit)
-        debug("expenses", expenses)
-
         return {
+            # 🔥 FE EXPECTED KEYS
             "grossRevenue": round(gross, 2),
             "netProfit": round(net_profit, 2),
             "expenses": round(expenses, 2),
@@ -5801,21 +5760,28 @@ def getProfitAndLossDetails(request):
             "skuCount": sku_count,
             "margin": round(margin, 2),
             "roi": round(roi, 2),
+
+            # 🔥 DETAIL BREAKDOWN (FE USES THIS)
             "shipping_cost": round(shipping, 2),
-            "tax_price": round(tax, 2)
+            "tax_price": round(tax, 2),
+            "base_price": round(revenue, 2),
+            "cogs": round(cogs, 2),
+            "channel_fee": round(channel_fee, 2),
+            "productRefunds": 0
         }
 
     # ---------------- EXECUTION ----------------
-    print("\n================ EXECUTION START ================")
-
     current = fetch_metrics(from_date, to_date)
     previous = fetch_metrics(prev_from, prev_to)
 
     def delta(metric):
+        curr = current.get(metric, 0)
+        prev = previous.get(metric, 0)
+
         return {
-            "current": current[metric],
-            "previous": previous[metric],
-            "delta": round(current[metric] - previous[metric], 2)
+            "current": curr,
+            "previous": prev,
+            "delta": round(curr - prev, 2)
         }
 
     response_data = {
@@ -5840,12 +5806,9 @@ def getProfitAndLossDetails(request):
         "to_date": to_date
     }
 
-    print("\n================ RESPONSE READY ================")
-    debug("FINAL_RESPONSE", response_data)
-
-    log("TOTAL", t0)
-
     return JsonResponse(response_data, safe=False)
+
+
 
 # @csrf_exempt
 # def profit_loss_chart(request):
