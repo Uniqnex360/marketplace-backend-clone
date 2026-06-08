@@ -1109,6 +1109,7 @@ def ordersCountForDashboard(request):
     marketplace_id = request.GET.get("marketplace_id")
     start_date = request.GET.get("start_date")
     end_date = request.GET.get("end_date")
+    country = request.GET.get("country")
     preset = request.GET.get("preset", "Today")
     brand_ids = []
     array_brand_ids = request.GET.getlist("brand_id[]")
@@ -1142,6 +1143,11 @@ def ordersCountForDashboard(request):
         "order_status": {"$nin": ["Canceled", "Cancelled"]},
         "total_price": {"$gt": 0},
     }
+
+    if country and country.lower() != "all":
+        match_conditions["geo"] = country
+        custom_match_conditions["geo"] = country
+
     if brand_ids:
         try:
             brand_object_ids = [ObjectId(bid) for bid in brand_ids if bid]

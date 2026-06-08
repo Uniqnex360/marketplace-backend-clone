@@ -1,14 +1,10 @@
 import time
 import pytz
 from pytz import timezone
-from datetime import datetime, timedelta
-from dateutil.relativedelta import relativedelta
 
-from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework.parsers import JSONParser
 from clickhouse.config import client
-from omnisight.models import Marketplace
 from omnisight.operations.helium_utils import get_date_range
 
 
@@ -136,26 +132,62 @@ def all_market_place_data_clickhouse(request):
     # -------------------------
     # BREAKDOWN QUERY (FIXED)
     # -------------------------
-    breakdown_query = f"""
-    SELECT
+    breakdown_query  = f"""
+        SELECT
         marketplace_id,
         marketplace_name,
         sum(order_total) AS grossRevenue,
         sum(cogs + referral_fee) AS expenses,
         sum(quantity) AS unitsSold,
         sum(product_cost * quantity) AS total_cogs,
+
         sum(
             item_price +
             shipping_price +
             promotion_discount +
             vendor_funding -
             (vendor_discount + ship_promotion_discount)
-        ) AS netProfit
+        ) AS netProfit,
+
+        round(
+            if(sum(order_total) = 0, 0,
+                (
+                    sum(
+                        item_price +
+                        shipping_price +
+                        promotion_discount +
+                        vendor_funding -
+                        (vendor_discount + ship_promotion_discount)
+                    ) / sum(order_total)
+                ) * 100
+            ),
+        2) AS margin
+
     FROM fact_order_items
     WHERE {where_clause}
     GROUP BY marketplace_id, marketplace_name
     ORDER BY grossRevenue DESC
     """
+    # breakdown_query = f"""
+    # SELECT
+    #     marketplace_id,
+    #     marketplace_name,
+    #     sum(order_total) AS grossRevenue,
+    #     sum(cogs + referral_fee) AS expenses,
+    #     sum(quantity) AS unitsSold,
+    #     sum(product_cost * quantity) AS total_cogs,
+    #     sum(
+    #         item_price +
+    #         shipping_price +
+    #         promotion_discount +
+    #         vendor_funding -
+    #         (vendor_discount + ship_promotion_discount)
+    #     ) AS netProfit
+    # FROM fact_order_items
+    # WHERE {where_clause}
+    # GROUP BY marketplace_id, marketplace_name
+    # ORDER BY grossRevenue DESC
+    # """
 
     logger.info("===== CURRENT QUERY =====")
     logger.info(current_query)

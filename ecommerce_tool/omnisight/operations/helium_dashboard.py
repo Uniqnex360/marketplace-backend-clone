@@ -4546,11 +4546,18 @@ def getProductPerformanceSummary(request):
 
     json_request = JSONParser().parse(request)
 
+    action = json_request.get("action")
+
+    order_clause = "DESC"  # default = best sellers
+
+    if action == "least":
+        order_clause = "ASC"   # least sold products
+
     print("\n================ DEBUG START ================\n")
     print("RAW REQUEST:", json_request)
 
     # ---------------- CLICKHOUSE QUERY (NO FILTERS) ----------------
-    query = """
+    query = f"""
     SELECT
         product_id,
         sku,
@@ -4576,7 +4583,8 @@ def getProductPerformanceSummary(request):
         WHERE order_status NOT IN ('Canceled','Cancelled')
         GROUP BY product_id, sku
     )
-    LIMIT 15
+    ORDER BY unitsSold {order_clause}
+    LIMIT 3
     """
 
     print("\nCLICKHOUSE QUERY:\n", query)

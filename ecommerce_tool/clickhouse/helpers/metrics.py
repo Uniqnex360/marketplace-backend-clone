@@ -11,54 +11,102 @@ def create_fact_order_items_table(request):
         return {"error": "Only POST allowed"}
 
     try:
+        # query = """
+        # CREATE TABLE IF NOT EXISTS fact_order_items
+        # (
+        #     order_id String,
+        #     order_item_id String,
+        #     purchase_order_id String,
+
+        #     order_date DateTime,
+        #     order_date_day Date,
+
+        #     marketplace_id String,
+        #     marketplace_name String,
+        #     fulfillment_channel String,
+        #     brand_id String,
+        #     manufacturer_name String,
+        #     product_id String,
+        #     sku String,
+        #     category String,
+
+        #     country String,
+        #     channel String,
+
+        #     order_total Float64,
+        #     shipping_price Float64,
+        #     merchant_shipment_cost Float64,
+        #     order_status LowCardinality(String),
+
+        #     item_price Float64,
+        #     item_tax Float64,
+        #     quantity UInt32,
+
+        #     promotion_discount Float64,
+        #     ship_promotion_discount Float64,
+
+        #     product_cost Float64,
+        #     cogs Float64,
+        #     referral_fee Float64,
+        #     vendor_funding Float64,
+        #     vendor_discount Float64,
+
+        #     gross_revenue Float64,
+        #     net_item_revenue Float64,
+
+        #     currency LowCardinality(String)
+        # )
+        # ENGINE = MergeTree
+        # PARTITION BY toYYYYMM(order_date)
+        # ORDER BY (order_date_day, marketplace_id, product_id, order_id)
+        # """
+
         query = """
-        CREATE TABLE IF NOT EXISTS fact_order_items
-        (
-            order_id String,
-            order_item_id String,
-            purchase_order_id String,
+        INSERT INTO daas.fact_order_items
+        SELECT
+            order_id,
+            order_item_id,
+            purchase_order_id,
 
-            order_date DateTime,
-            order_date_day Date,
+            -- modified date (safe replacement)
+            toDateTime('2026-06-05 00:00:00')
+                + INTERVAL (rand() % 4) DAY
+                + INTERVAL (rand() % 24) HOUR AS order_date,
 
-            marketplace_id String,
-            marketplace_name String,
-            fulfillment_channel String,
-            brand_id String,
-            manufacturer_name String,
-            product_id String,
-            sku String,
-            category String,
+            toDate(order_date) AS order_date_day,
 
-            country String,
-            channel String,
+            marketplace_id,
+            marketplace_name,
+            fulfillment_channel,
+            brand_id,
+            manufacturer_name,
+            product_id,
+            sku,
+            category,
+            country,
+            channel,
 
-            order_total Float64,
-            shipping_price Float64,
-            merchant_shipment_cost Float64,
-            order_status LowCardinality(String),
+            order_total,
+            shipping_price,
+            merchant_shipment_cost,
+            order_status,
+            item_price,
+            item_tax,
+            quantity,
+            promotion_discount,
+            ship_promotion_discount,
+            product_cost,
+            cogs,
+            referral_fee,
+            vendor_funding,
+            vendor_discount,
+            gross_revenue,
+            net_item_revenue,
+            currency
 
-            item_price Float64,
-            item_tax Float64,
-            quantity UInt32,
-
-            promotion_discount Float64,
-            ship_promotion_discount Float64,
-
-            product_cost Float64,
-            cogs Float64,
-            referral_fee Float64,
-            vendor_funding Float64,
-            vendor_discount Float64,
-
-            gross_revenue Float64,
-            net_item_revenue Float64,
-
-            currency LowCardinality(String)
-        )
-        ENGINE = MergeTree
-        PARTITION BY toYYYYMM(order_date)
-        ORDER BY (order_date_day, marketplace_id, product_id, order_id)
+        FROM daas.fact_order_items
+        WHERE lower(channel) IN ('temu', 'target')
+        AND order_date_day BETWEEN '2026-06-05' AND '2026-06-08';
         """
 
         client.command(query)
@@ -167,9 +215,7 @@ def get_metrics_by_date_range_clickhouse(request):
     graph_rows = client.query(graph_query, parameters=params).result_rows
 
     graph_data = {
-        r[0].strftime("%B %d, %Y").lower(): {
-            "gross_revenue_with_tax": round(r[1], 2)
-        }
+        r[0].strftime("%B %d, %Y").lower(): {"gross_revenue_with_tax": round(r[1], 2)}
         for r in graph_rows
     }
 

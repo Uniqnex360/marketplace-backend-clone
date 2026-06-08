@@ -121,8 +121,10 @@ def migrate_mongo_order_item_to_clickhouse_task():
 
     from datetime import datetime
 
-    start_date = datetime(2026, 5, 10)
-    end_date = datetime(2026, 5, 13)  # exclusive
+    # start_date = datetime(2026, 6, 1)
+    # end_date = datetime(2026, 6, 13)  # exclusive
+    start_date = "2026-06-01 00:00:00"
+    end_date = "2026-06-13 00:00:00"
 
     order_cursor = (
         Order._get_collection()
@@ -156,6 +158,7 @@ def migrate_mongo_order_item_to_clickhouse_task():
     orders_count = 0
 
     for order in order_cursor:
+        print("order id", order.get("_id"))
         orders_count += 1
 
         order_id = str(order["_id"])
