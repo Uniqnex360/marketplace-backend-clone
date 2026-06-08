@@ -1,9 +1,8 @@
 import datetime
-
+import json
+from django.views.decorators.csrf import csrf_exempt
 from pymongo import MongoClient
-from bson import ObjectId
 from django.conf import settings
-import re
 
 client = MongoClient(settings.DATABASE_HOST)
 db = client["ecommerce_db"]
@@ -21,7 +20,6 @@ marketplaces = db["marketplace"]
 # HELPERS
 # -----------------------------
 
-
 def normalize(name):
     if not name:
         return "Unknown"
@@ -30,6 +28,8 @@ def normalize(name):
         return "Temu"
     if "amazon" in name:
         return "Amazon"
+    if "target" in name:
+        return "Target"
     if "ebay" in name:
         return "eBay"
     return name.title()
@@ -42,35 +42,11 @@ def get_marketplace(name, geo="US"):
     if mp:
         return mp["_id"]
 
-    return marketplaces.insert_one(
-        {"name": name, "image_url": "", "country": [geo]}
-    ).inserted_id
-
-
-def extract_objectid(val):
-    if not val:
-        return None
-
-    if isinstance(val, ObjectId):
-        return val
-
-    val = str(val)
-    match = re.search(r"ObjectId\('([a-f0-9]{24})'\)", val)
-    if match:
-        return ObjectId(match.group(1))
-
-    if len(val) == 24:
-        try:
-            return ObjectId(val)
-        except:
-            return None
-
-    return None
-
-
-# -----------------------------
-# PRODUCT UPSERT
-# -----------------------------
+    return marketplaces.insert_one({
+        "name": name,
+        "image_url": "",
+        "country": [geo]
+    }).inserted_id
 
 
 def get_or_create_product(item):
@@ -90,7 +66,7 @@ def get_or_create_product(item):
     if product:
         return product["_id"]
 
-    product_doc = {
+    return products.insert_one({
         "product_title": item.get("product_title"),
         "sku": sku,
         "asin": asin,
@@ -99,135 +75,175 @@ def get_or_create_product(item):
         "brand": item.get("product_brand"),
         "manufacturer": item.get("product_manufacturer"),
         "created_from": "temp_migration",
-    }
-
-    return products.insert_one(product_doc).inserted_id
-
-
-# -----------------------------
-# ORDER CHECK
-# -----------------------------
-def find_order(t):
-    purchase_id = t.get("purchase_order_id")
-    merchant_id = t.get("merchant_order_id")
-
-    query = None
-
-    if purchase_id:
-        query = {"purchase_order_id": purchase_id}
-
-    if not query and merchant_id:
-        query = {"merchant_order_id": merchant_id}
-
-    if not query:
-        return None
-
-    print("QUERY:", query)
-    data = orders.find_one(query)
-    print("FOUND:", data)
-
-    return data
+        "created_at": datetime.datetime.utcnow(),
+    }).inserted_id
 
 
 # -----------------------------
-# MIGRATION
+# HARD DELETE (FIXED)
 # -----------------------------
 
+def delete_existing_order_and_items(order_doc):
+    """
+    HARD RESET:
+    delete order + ALL related orderitems
+    """
 
-def migrate():
-    print("\n🚀 FULL ETL MIGRATION START\n")
+    order_id = order_doc["_id"]
+    purchase_id = order_doc.get("purchase_order_id")
 
-    for t_order in temp_orders.find():
+    print(f"🗑 Deleting existing order: {purchase_id}")
 
-        purchase_id = t_order.get("purchase_order_id")
-        merchant_id = t_order.get("merchant_order_id")
+    # ✅ DELETE ALL ORDER ITEMS (FIXED LOGIC)
+    orderitems.delete_many({"OrderId": purchase_id})
 
-        print(f"\n➡ Processing Order: {purchase_id}")
+    # delete order
+    orders.delete_one({"_id": order_id})
 
-        if find_order(t_order):
-            print("⚠ Order exists → skipping")
-            continue
 
-        # -------------------------
-        # MARKETPLACE
-        # -------------------------
-        marketplace_id = get_marketplace(
-            t_order.get("marketplace_name"), t_order.get("Geo", "US")
-        )
+# -----------------------------
+# MAIN API
+# -----------------------------
 
-        # -------------------------
-        # ORDER ITEMS SOURCE
-        # -------------------------
-        items = list(temp_items.find({"order_id": purchase_id}))
+@csrf_exempt
+def migrate_temp_orders_to_orders(request):
 
-        order_item_ids = []
+    if request.method != "POST":
+        return {"error": "POST method required"}
 
-        # -------------------------
-        # PROCESS ITEMS
-        # -------------------------
-        for it in items:
+    try:
+        body = json.loads(request.body or "{}")
+        limit = body.get("limit")
 
-            # PRODUCT CREATE / GET
-            product_id = get_or_create_product(it)
+        cursor = temp_orders.find()
+        if limit:
+            cursor = cursor.limit(int(limit))
 
-            # ORDER ITEM DUP CHECK
-            existing_item = orderitems.find_one(
-                {
-                    "OrderId": purchase_id,
-                    "ProductDetails.SKU": it.get("product_details_SKU"),
-                }
+        migrated = 0
+        replaced = 0
+        missing_items_report = []
+
+        print("\n🚀 MIGRATION START\n")
+
+        for t in cursor:
+
+            order_key = t.get("order_id")
+            purchase_id = t.get("purchase_order_id")
+            merchant_id = t.get("merchant_order_id")
+
+            print(f"\n➡ Processing: {order_key}")
+
+            # -----------------------------
+            # CHECK EXISTING ORDER
+            # -----------------------------
+            existing_order = orders.find_one({
+                "purchase_order_id": purchase_id
+            })
+
+            if existing_order:
+                # 🔥 THIS NOW DELETES BOTH ORDER + ORDERITEMS
+                delete_existing_order_and_items(existing_order)
+                replaced += 1
+
+            # -----------------------------
+            # MARKETPLACE
+            # -----------------------------
+            marketplace_id = get_marketplace(
+                t.get("marketplace_name") or t.get("Type"),
+                t.get("Geo", "US")
             )
 
-            if existing_item:
-                order_item_ids.append(existing_item["_id"])
-                continue
+            # -----------------------------
+            # GET TEMP ITEMS
+            # -----------------------------
+            items = list(temp_items.find({
+                "order_id": order_key
+            }))
 
-            order_item_doc = {
-                "OrderId": purchase_id,
-                "Platform": it.get("platform"),
-                "product_id": product_id,
-                "ProductDetails": {
-                    "product_id": product_id,
-                    "Title": it.get("product_title"),
-                    "SKU": it.get("product_details_SKU"),
-                    "ASIN": it.get("product_details_ASIN"),
-                    "QuantityOrdered": it.get("product_details_QuantityOrdered"),
-                    "QuantityShipped": it.get("product_details_QuantityShipped"),
-                },
-                "Pricing": {
-                    "ItemPrice": {
-                        "CurrencyCode": it.get("pricing_ItemPrice_CurrencyCode"),
-                        "Amount": it.get("pricing_ItemPrice_Amount"),
-                    }
-                },
+            order_item_ids = []
+            missing_items = []
+
+            # -----------------------------
+            # CREATE ORDER ITEMS
+            # -----------------------------
+            for it in items:
+                try:
+                    product_id = get_or_create_product(it)
+
+                    inserted = orderitems.insert_one({
+                        "OrderId": purchase_id,
+                        "product_id": product_id,
+                        "ProductDetails": {
+                            "Title": it.get("product_title"),
+                            "SKU": it.get("product_details_SKU"),
+                            "ASIN": it.get("product_details_ASIN"),
+                            "QuantityOrdered": it.get("product_details_QuantityOrdered"),
+                            "QuantityShipped": it.get("product_details_QuantityShipped"),
+                        },
+                        "Pricing": {
+                            "ItemPrice": {
+                                "CurrencyCode": it.get("pricing_ItemPrice_CurrencyCode"),
+                                "Amount": it.get("pricing_ItemPrice_Amount"),
+                            }
+                        },
+                        "marketplace_id": marketplace_id,
+                        "created_date": it.get("created_date"),
+                        "updated_at": it.get("updated_at"),
+                    })
+
+                    order_item_ids.append(inserted.inserted_id)
+
+                except Exception as e:
+                    missing_items.append({
+                        "temp_item_id": str(it.get("_id")),
+                        "error": str(e)
+                    })
+
+            # -----------------------------
+            # CREATE ORDER
+            # -----------------------------
+            orders.insert_one({
+                "purchase_order_id": purchase_id,
+                "merchant_order_id": merchant_id,
+                "order_key": order_key,
+
+                "geo": t.get("Geo"),
+                "channel": normalize(t.get("Type") or t.get("marketplace_name")),
+
+                "order_date": t.get("order_date"),
+                "last_update_date": t.get("last_update_date"),
+                "order_status": t.get("order_status"),
+
+                "shipping_info_City": t.get("shipping_info_City"),
+                "shipping_info_StateOrRegion": t.get("shipping_info_StateOrRegion"),
+                "shipping_info_PostalCode": t.get("shipping_info_PostalCode"),
+                "shipping_info_CountryCode": t.get("shipping_info_CountryCode"),
+
+                "shipping_cost": t.get("shipping_cost", 0),
+                "order_total": t.get("order_total", 0),
+                "currency": t.get("currency"),
+                "items_order_quantity": t.get("items_order_quantity", 0),
+
                 "marketplace_id": marketplace_id,
-                "created_date": it.get("created_date"),
-                "updated_at": it.get("updated_at"),
-            }
+                "fulfillment_channel": t.get("fulfillment_channel"),
 
-            inserted = orderitems.insert_one(order_item_doc)
-            order_item_ids.append(inserted.inserted_id)
+                "order_items": order_item_ids,
+                "created_at": datetime.datetime.utcnow(),
+            })
 
-        # -------------------------
-        # ORDER CREATE
-        # -------------------------
-        order_doc = {
-            "purchase_order_id": purchase_id,
-            "merchant_order_id": merchant_id,
-            "geo": t_order.get("Geo"),
-            "channel": t_order.get("channel"),
-            "order_date": t_order.get("order_date"),
-            "order_status": t_order.get("order_status"),
-            "shipping_cost": t_order.get("shipping_cost", 0),
-            "order_total": t_order.get("order_total", 0),
-            "currency": t_order.get("currency"),
-            "marketplace_id": marketplace_id,
-            "order_items": order_item_ids,
-            "migrate_date": datetime.datetime.utcnow(),
+            migrated += 1
+
+            print(f"✅ Done: {order_key}")
+
+        return {
+            "status": "success",
+            "migrated": migrated,
+            "replaced": replaced,
+            "missing_items": missing_items_report
         }
 
-        orders.insert_one(order_doc)
-
-        print(f"✅ Migrated Order: {purchase_id}")
-
-    print("\n🎉 DONE - FULL MIGRATION COMPLETE\n")
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }

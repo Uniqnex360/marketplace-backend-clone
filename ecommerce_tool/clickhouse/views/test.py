@@ -34,3 +34,27 @@ def sandbox_clickhouse(request):
     ]
 
     return send_response({"count": len(data), "data": data})
+
+
+@csrf_exempt
+def get_all_order_ids(request):
+    """Fetch all order_ids from fact_order_items"""
+
+    try:
+        query = """
+        SELECT DISTINCT order_id
+        FROM fact_order_items
+        WHERE order_id IS NOT NULL
+        """
+
+        result = client.query(query).result_rows
+
+        order_ids = [row[0] for row in result] if result else []
+
+        return send_response({
+            "count": len(order_ids),
+            "order_ids": order_ids
+        })
+
+    except Exception as e:
+        return send_error_response(e)
