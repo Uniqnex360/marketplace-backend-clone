@@ -158,7 +158,6 @@ def drop_fact_order_items_table(request):
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-
 @csrf_exempt
 def get_metrics_by_date_range_clickhouse(request):
 
@@ -177,15 +176,9 @@ def get_metrics_by_date_range_clickhouse(request):
     else:
         start_date, end_date = get_date_range(preset)
 
-    # -------------------------
-    # ClickHouse SAFE DATE FORMAT
-    # -------------------------
     def to_clickhouse_date(d):
         return d.strftime("%Y-%m-%d")
 
-    # -------------------------
-    # WHERE BUILDER (SAFE)
-    # -------------------------
     where_clauses = ["order_date_day BETWEEN {start:Date} AND {end:Date}"]
 
     params = {
@@ -193,7 +186,6 @@ def get_metrics_by_date_range_clickhouse(request):
         "end": to_clickhouse_date(end_date),
     }
 
-    # IMPORTANT: only add if value exists and is meaningful
     if country:
         where_clauses.append("country = {country:String}")
         params["country"] = country
@@ -220,21 +212,29 @@ def get_metrics_by_date_range_clickhouse(request):
     graph_rows = client.query(graph_query, parameters=params).result_rows
 
     graph_data = {
-        r[0].strftime("%B %d, %Y").lower(): {"gross_revenue_with_tax": round(r[1], 2)}
+        r[0].strftime("%B %d, %Y").lower(): {
+            "gross_revenue_with_tax": round(r[1], 2)
+        }
         for r in graph_rows
     }
 
     # -------------------------
-    # METRICS QUERY
+    # METRICS QUERY (UPDATED)
     # -------------------------
     metrics_query = f"""
         SELECT
             sum(gross_revenue) AS gross_revenue_with_tax,
-            sum(cogs) AS total_cogs,
-            sum(referral_fee) AS total_referral_fee,
+
+            sum(product_cost * quantity + merchant_shipment_cost) AS cogs,
+            sum(referral_fee) AS channel_fees,
+
             sum(quantity) AS total_units,
             sum(item_tax) AS total_tax,
-            sum(product_cost * quantity) AS product_cost,
+
+            sum(item_price) AS total_item_price,
+            sum(promotion_discount) AS promotion_discount,
+            sum(ship_promotion_discount) AS ship_promotion_discount,
+
             uniq(order_id) AS total_orders,
 
             sum(merchant_shipment_cost) AS shipping_cost,
@@ -248,9 +248,6 @@ def get_metrics_by_date_range_clickhouse(request):
 
     target = client.query(metrics_query, parameters=params).result_rows[0]
 
-    # -------------------------
-    # PREVIOUS PERIOD (SAFE)
-    # -------------------------
     previous_start = start_date - timedelta(days=1)
     previous_end = end_date - timedelta(days=1)
 
@@ -259,7 +256,6 @@ def get_metrics_by_date_range_clickhouse(request):
         "end": to_clickhouse_date(previous_end),
     }
 
-    # IMPORTANT: keep same filters consistent
     if country:
         previous_params["country"] = country
 
@@ -269,41 +265,58 @@ def get_metrics_by_date_range_clickhouse(request):
     previous = client.query(metrics_query, parameters=previous_params).result_rows[0]
 
     # -------------------------
-    # RESPONSE BUILDER
+    # METRICS BUILDER (UPDATED LOGIC)
     # -------------------------
     def build_metrics(row):
 
         gross = row[0] or 0
+
         cogs = row[1] or 0
-        referral_fee = row[2] or 0
+        channel_fees = row[2] or 0
+
         units = row[3] or 0
         tax = row[4] or 0
-        product_cost = row[5] or 0
-        orders = row[6] or 0
 
-        shipping_cost = row[7] or 0
-        shipping_price = row[8] or 0
-        vendor_funding = row[9] or 0
-        vendor_discount = row[10] or 0
+        item_price = row[5] or 0
+        promo_discount = row[6] or 0
+        ship_promo_discount = row[7] or 0
 
-        expense = (
-            cogs
-            + referral_fee
-            + shipping_cost
+        orders = row[8] or 0
+
+        shipping_cost = row[9] or 0
+        shipping_price = row[10] or 0
+        vendor_funding = row[11] or 0
+        vendor_discount = row[12] or 0
+
+        # -------------------------
+        # CORE FINANCE LOGIC (FIXED)
+        # -------------------------
+
+        expense = cogs + channel_fees
+
+        revenue_side = (
+            item_price
             + shipping_price
-            - vendor_funding
-            - vendor_discount
+            + vendor_funding
+            + promo_discount
         )
 
-        net_profit = gross - expense
+        cost_side = (
+            channel_fees
+            + cogs
+            + vendor_discount
+            + ship_promo_discount
+        )
+
+        net_profit = revenue_side - cost_side
 
         return {
             "gross_revenue_with_tax": gross,
             "total_cogs": cogs,
-            "referral_fee": referral_fee,
+            "referral_fee": channel_fees,
             "total_units": units,
             "total_tax": tax,
-            "product_cost": product_cost,
+            "product_cost": item_price,
             "total_orders": orders,
             "total_expense": expense,
             "net_profit": net_profit,
