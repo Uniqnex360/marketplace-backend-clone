@@ -61,54 +61,59 @@ def create_fact_order_items_table(request):
         # ORDER BY (order_date_day, marketplace_id, product_id, order_id)
         # """
 
+        # query = """
+        # INSERT INTO daas.fact_order_items
+        # SELECT
+        #     order_id,
+        #     order_item_id,
+        #     purchase_order_id,
+
+        #     -- modified date (safe replacement)
+        #     toDateTime('2026-06-05 00:00:00')
+        #         + INTERVAL (rand() % 4) DAY
+        #         + INTERVAL (rand() % 24) HOUR AS order_date,
+
+        #     toDate(order_date) AS order_date_day,
+
+        #     marketplace_id,
+        #     marketplace_name,
+        #     fulfillment_channel,
+        #     brand_id,
+        #     manufacturer_name,
+        #     product_id,
+        #     sku,
+        #     category,
+        #     country,
+        #     channel,
+
+        #     order_total,
+        #     shipping_price,
+        #     merchant_shipment_cost,
+        #     order_status,
+        #     item_price,
+        #     item_tax,
+        #     quantity,
+        #     promotion_discount,
+        #     ship_promotion_discount,
+        #     product_cost,
+        #     cogs,
+        #     referral_fee,
+        #     vendor_funding,
+        #     vendor_discount,
+        #     gross_revenue,
+        #     net_item_revenue,
+        #     currency
+
+        # FROM daas.fact_order_items
+        # WHERE lower(channel) IN ('temu', 'target')
+        # AND order_date_day BETWEEN '2026-06-05' AND '2026-06-08';
+        # """
+
         query = """
-        INSERT INTO daas.fact_order_items
-        SELECT
-            order_id,
-            order_item_id,
-            purchase_order_id,
-
-            -- modified date (safe replacement)
-            toDateTime('2026-06-05 00:00:00')
-                + INTERVAL (rand() % 4) DAY
-                + INTERVAL (rand() % 24) HOUR AS order_date,
-
-            toDate(order_date) AS order_date_day,
-
-            marketplace_id,
-            marketplace_name,
-            fulfillment_channel,
-            brand_id,
-            manufacturer_name,
-            product_id,
-            sku,
-            category,
-            country,
-            channel,
-
-            order_total,
-            shipping_price,
-            merchant_shipment_cost,
-            order_status,
-            item_price,
-            item_tax,
-            quantity,
-            promotion_discount,
-            ship_promotion_discount,
-            product_cost,
-            cogs,
-            referral_fee,
-            vendor_funding,
-            vendor_discount,
-            gross_revenue,
-            net_item_revenue,
-            currency
-
-        FROM daas.fact_order_items
-        WHERE lower(channel) IN ('temu', 'target')
-        AND order_date_day BETWEEN '2026-06-05' AND '2026-06-08';
+        ALTER TABLE daas.fact_order_items
+        DELETE WHERE order_date_day >= '2026-06-01'
+        AND order_date_day <= '2026-06-30';
         """
-
         client.command(query)
 
         return {
