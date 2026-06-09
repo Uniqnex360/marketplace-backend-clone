@@ -1,6 +1,7 @@
 import time
 import pytz
 from pytz import timezone
+from datetime import datetime
 
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework.parsers import JSONParser
@@ -229,7 +230,7 @@ def all_market_place_data_clickhouse(request):
         marketplace_list.append(
             {
                 "marketplace_id": data.get("marketplace_id"),
-                "marketplace_name": data.get("marketplace_name", ""),
+                "marketplace": data.get("marketplace_name", ""),
                 "currency_list": [
                     {
                         "grossRevenue": data.get("grossRevenue", 0),
