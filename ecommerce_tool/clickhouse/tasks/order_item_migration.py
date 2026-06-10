@@ -98,15 +98,13 @@ def migrate_mongo_order_item_to_clickhouse_task():
 
         return None
 
-    def get_product(product_id):
-        product_id = normalize_product_id(product_id)
-
-        if not product_id:
+    def get_product_by_sku(sku):
+        if not sku:
             return {}
 
         return (
             Product._get_collection().find_one(
-                {"_id": product_id},
+                {"sku": sku},
                 {
                     "_id": 1,
                     "product_cost": 1,
@@ -141,12 +139,7 @@ def migrate_mongo_order_item_to_clickhouse_task():
     order_cursor = (
         Order._get_collection()
         .find(
-            {
-                "order_date": {
-                    "$gte": start_date,
-                    "$lt": end_date,
-                }
-            },
+            {"migrate_date": {"$exists": True}},
             {
                 "_id": 1,
                 "order_items": 1,
@@ -224,13 +217,13 @@ def migrate_mongo_order_item_to_clickhouse_task():
                 item.get("ProductDetails", {}).get("QuantityOrdered", 1) or 1
             )
 
-            product_id = item.get("ProductDetails", {}).get("product_id")
-            product = get_product(product_id)
+            sku = item.get("ProductDetails", {}).get("SKU", "")
+
+            product = get_product_by_sku(sku)
 
             brand_id = str(product.get("brand_id") or "")
             product_cost = float(product.get("product_cost", 0) or 0)
             referral_fee = float(product.get("referral_fee", 0) or 0)
-            sku = product.get("sku", "")
             category = product.get("category", "")
 
             record_tuple = (

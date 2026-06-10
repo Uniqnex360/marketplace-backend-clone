@@ -5155,6 +5155,107 @@ from django.http import JsonResponse
 from rest_framework.parsers import JSONParser
 from django.views.decorators.csrf import csrf_exempt
 
+# @csrf_exempt
+# def getProductPerformanceSummary(request):
+
+#     json_request = JSONParser().parse(request)
+
+#     action = json_request.get("action")
+
+#     # =========================================================
+#     # DATE LOGIC (UNCHANGED)
+#     # =========================================================
+
+#     preset = json_request.get("preset", "Today")
+#     start_date_str = json_request.get("start_date")
+#     end_date_str = json_request.get("end_date")
+#     timezone_str = json_request.get("timezone", "Asia/Calcutta")
+
+#     if start_date_str and end_date_str:
+#         start_date, end_date = convertdateTotimezone(
+#             start_date_str, end_date_str, timezone_str
+#         )
+#     else:
+#         start_date, end_date = get_date_range(preset, timezone_str)
+
+#     # normalize (important for ClickHouse Date comparison)
+#     start_date = start_date.date() if hasattr(start_date, "date") else start_date
+#     end_date = end_date.date() if hasattr(end_date, "date") else end_date
+
+#     order_clause = "DESC"
+#     if action == "least":
+#         order_clause = "ASC"
+
+#     print("\n================ DEBUG START ================\n")
+#     print("RAW REQUEST:", json_request)
+#     print("START:", start_date, "END:", end_date)
+
+#     # =========================================================
+#     # CLICKHOUSE QUERY (FIXED VERSION - MATCHES YOUR WORKING SQL)
+#     # =========================================================
+
+#     query = f"""
+#     SELECT
+#         product_id,
+#         sku,
+#         unitsSold,
+#         grossRevenue,
+#         totalCogs,
+#         vendor_funding,
+#         (grossRevenue - totalCogs + vendor_funding) AS netProfit,
+#         if(grossRevenue > 0,
+#             ((grossRevenue - totalCogs + vendor_funding) / grossRevenue) * 100,
+#             0
+#         ) AS margin
+#     FROM
+#     (
+#         SELECT
+#             product_id,
+#             sku,
+#             sum(quantity) AS unitsSold,
+#             sum(gross_revenue) AS grossRevenue,
+#             sum(cogs) AS totalCogs,
+#             sum(vendor_funding) AS vendor_funding
+#         FROM fact_order_items
+#         WHERE
+#             order_status NOT IN ('Canceled','Cancelled')
+#             AND order_date_day BETWEEN toDate('{start_date}') AND toDate('{end_date}')
+#         GROUP BY product_id, sku
+#     )
+#     ORDER BY unitsSold {order_clause}
+#     LIMIT 3
+#     """
+
+#     print("\nCLICKHOUSE QUERY:\n", query)
+
+#     try:
+#         rows = client.query(query).result_rows
+#     except Exception as e:
+#         print("CLICKHOUSE ERROR:", str(e))
+#         return JsonResponse([], safe=False)
+
+#     print("\nROW COUNT:", len(rows))
+#     print("\n================ DEBUG END ================\n")
+
+#     # =========================================================
+#     # RESPONSE (DO NOT CHANGE STRUCTURE)
+#     # =========================================================
+
+#     result = []
+#     for r in rows:
+#         result.append({
+#             "product_id": r[0] or "",
+#             "sku": r[1] or "",
+#             "unitsSold": r[2] or 0,
+#             "grossRevenue": r[3] or 0,
+#             "totalCogs": r[4] or 0,
+#             "vendor_funding": r[5] or 0,
+#             "netProfit": r[6] or 0,
+#             "margin": r[7] or 0
+#         })
+
+#     return JsonResponse(result, safe=False)
+
 @csrf_exempt
 def getProductPerformanceSummary(request):
 
@@ -5162,37 +5263,70 @@ def getProductPerformanceSummary(request):
 
     action = json_request.get("action")
 
-    # =========================================================
-    # DATE LOGIC (UNCHANGED)
-    # =========================================================
+    country = json_request.get("country", "US")
+    brand_ids = json_request.get("brand_id", [])
+    marketplace_id = json_request.get("marketplace_id")
 
-    preset = json_request.get("preset", "Today")
+    preset = json_request.get("preset")
     start_date_str = json_request.get("start_date")
     end_date_str = json_request.get("end_date")
-    timezone_str = json_request.get("timezone", "Asia/Calcutta")
 
     if start_date_str and end_date_str:
-        start_date, end_date = convertdateTotimezone(
-            start_date_str, end_date_str, timezone_str
-        )
-    else:
-        start_date, end_date = get_date_range(preset, timezone_str)
+        start_date = datetime.strptime(
+            start_date_str,
+            "%d/%m/%Y"
+        ).date()
 
-    # normalize (important for ClickHouse Date comparison)
-    start_date = start_date.date() if hasattr(start_date, "date") else start_date
-    end_date = end_date.date() if hasattr(end_date, "date") else end_date
+        end_date = datetime.strptime(
+            end_date_str,
+            "%d/%m/%Y"
+        ).date()
+    else:
+        start_date, end_date = get_date_range(preset)
 
     order_clause = "DESC"
     if action == "least":
         order_clause = "ASC"
 
+    where_clauses = [
+        "order_status NOT IN ('Canceled', 'Cancelled')",
+        "order_date_day BETWEEN {start:Date} AND {end:Date}"
+    ]
+
+    params = {
+        "start": start_date.strftime("%Y-%m-%d"),
+        "end": end_date.strftime("%Y-%m-%d")
+    }
+
+    if country:
+        where_clauses.append(
+            "country = {country:String}"
+        )
+        params["country"] = country
+
+    if brand_ids:
+        where_clauses.append(
+            "brand_id IN {brand_ids:Array(String)}"
+        )
+        params["brand_ids"] = brand_ids
+
+    if marketplace_id and marketplace_id != "all":
+
+        if not isinstance(marketplace_id, list):
+            marketplace_id = [marketplace_id]
+
+        where_clauses.append(
+            "marketplace_id IN {marketplace_id:Array(String)}"
+        )
+
+        params["marketplace_id"] = marketplace_id
+
+    where_sql = " AND ".join(where_clauses)
+
     print("\n================ DEBUG START ================\n")
     print("RAW REQUEST:", json_request)
-    print("START:", start_date, "END:", end_date)
-
-    # =========================================================
-    # CLICKHOUSE QUERY (FIXED VERSION - MATCHES YOUR WORKING SQL)
-    # =========================================================
+    print("START DATE:", start_date)
+    print("END DATE:", end_date)
 
     query = f"""
     SELECT
@@ -5203,7 +5337,8 @@ def getProductPerformanceSummary(request):
         totalCogs,
         vendor_funding,
         (grossRevenue - totalCogs + vendor_funding) AS netProfit,
-        if(grossRevenue > 0,
+        if(
+            grossRevenue > 0,
             ((grossRevenue - totalCogs + vendor_funding) / grossRevenue) * 100,
             0
         ) AS margin
@@ -5218,30 +5353,30 @@ def getProductPerformanceSummary(request):
             sum(vendor_funding) AS vendor_funding
         FROM fact_order_items
         WHERE
-            order_status NOT IN ('Canceled','Cancelled')
-            AND order_date_day BETWEEN toDate('{start_date}') AND toDate('{end_date}')
-        GROUP BY product_id, sku
+            {where_sql}
+        GROUP BY
+            product_id,
+            sku
     )
     ORDER BY unitsSold {order_clause}
     LIMIT 3
     """
 
     print("\nCLICKHOUSE QUERY:\n", query)
+    print("PARAMS:", params)
 
     try:
-        rows = client.query(query).result_rows
+        rows = client.query(
+            query,
+            parameters=params
+        ).result_rows
+
     except Exception as e:
         print("CLICKHOUSE ERROR:", str(e))
         return JsonResponse([], safe=False)
 
-    print("\nROW COUNT:", len(rows))
-    print("\n================ DEBUG END ================\n")
-
-    # =========================================================
-    # RESPONSE (DO NOT CHANGE STRUCTURE)
-    # =========================================================
-
     result = []
+
     for r in rows:
         result.append({
             "product_id": r[0] or "",
@@ -5255,7 +5390,6 @@ def getProductPerformanceSummary(request):
         })
 
     return JsonResponse(result, safe=False)
-
 
 @csrf_exempt
 def downloadProductPerformanceSummary(request):

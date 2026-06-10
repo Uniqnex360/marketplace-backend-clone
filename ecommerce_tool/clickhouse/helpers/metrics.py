@@ -166,6 +166,7 @@ def get_metrics_by_date_range_clickhouse(request):
     country = json_request.get("country", "US")
     brand_ids = json_request.get("brand_id", [])
     preset = json_request.get("preset")
+    marketplace_id = json_request.get("marketplace_id")
 
     start_date_str = json_request.get("start_date")
     end_date_str = json_request.get("end_date")
@@ -193,6 +194,13 @@ def get_metrics_by_date_range_clickhouse(request):
     if brand_ids:
         where_clauses.append("brand_id IN {brand_ids:Array(String)}")
         params["brand_ids"] = brand_ids
+
+    if marketplace_id and marketplace_id != "all":
+        if not isinstance(marketplace_id, list):
+            marketplace_id = [marketplace_id]
+
+        where_clauses.append("marketplace_id IN {marketplace_id:Array(String)}")
+        params["marketplace_id"] = marketplace_id
 
     where_sql = " AND ".join(where_clauses)
 
@@ -261,6 +269,9 @@ def get_metrics_by_date_range_clickhouse(request):
 
     if brand_ids:
         previous_params["brand_ids"] = brand_ids
+
+    if marketplace_id and marketplace_id != "all":
+        previous_params["marketplace_id"] = marketplace_id
 
     previous = client.query(metrics_query, parameters=previous_params).result_rows[0]
 
