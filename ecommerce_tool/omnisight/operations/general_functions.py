@@ -614,25 +614,53 @@ def fetchOrderDetails(request):
                 "order_date": {
                     "$dateToString": {
                         "format": "%Y-%m-%dT%H:%M:%S.%LZ",
-                        "date": {"$ifNull": ["$order_date", None]},
+                        "date": {
+                            "$convert": {
+                                "input": "$order_date",
+                                "to": "date",
+                                "onError": None,
+                                "onNull": None
+                            }
+                        }
                     }
                 },
                 "earliest_ship_date": {
                     "$dateToString": {
                         "format": "%Y-%m-%dT%H:%M:%S.%LZ",
-                        "date": {"$ifNull": ["$earliest_ship_date", None]},
+                        "date": {
+                            "$convert": {
+                                "input": "$earliest_ship_date",
+                                "to": "date",
+                                "onError": None,
+                                "onNull": None
+                            }
+                        }
                     }
                 },
                 "latest_ship_date": {
                     "$dateToString": {
                         "format": "%Y-%m-%dT%H:%M:%S.%LZ",
-                        "date": {"$ifNull": ["$latest_ship_date", None]},
+                        "date": {
+                            "$convert": {
+                                "input": "$latest_ship_date",
+                                "to": "date",
+                                "onError": None,
+                                "onNull": None
+                            }
+                        }
                     }
                 },
                 "last_update_date": {
                     "$dateToString": {
                         "format": "%Y-%m-%dT%H:%M:%S.%LZ",
-                        "date": {"$ifNull": ["$last_update_date", None]},
+                        "date": {
+                            "$convert": {
+                                "input": "$last_update_date",
+                                "to": "date",
+                                "onError": None,
+                                "onNull": None
+                            }
+                        }
                     }
                 },
                 "shipping_information": {"$ifNull": ["$shipping_information", {}]},

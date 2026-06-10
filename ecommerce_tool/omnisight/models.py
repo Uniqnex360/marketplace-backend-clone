@@ -130,6 +130,7 @@ class Product(Document):
     w_total_cogs = FloatField(default=0.0)  # Total cost of goods sold for Walmart
     pack_size = IntField(default=0)  # Size of the product pack
     meta = {
+         "strict": False,
         'indexes': [
             'marketplace_id',
             'brand_id',

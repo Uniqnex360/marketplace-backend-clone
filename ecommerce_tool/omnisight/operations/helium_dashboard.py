@@ -4114,6 +4114,7 @@ def getPeriodWiseDataCustom(request):
     return JsonResponse(response_data, safe=False)
 
 
+
 # @csrf_exempt
 # def allMarketplaceData(request):
 #     json_request = JSONParser().parse(request)
@@ -6407,202 +6408,11 @@ def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,ma
 
 from clickhouse.config import client
 
-
-# @csrf_exempt
-# def getProfitAndLossDetails(request):
-#     import time
-#     from rest_framework.parsers import JSONParser
-#     from datetime import datetime
-
-#     json_request = JSONParser().parse(request)
-
-#     marketplace_id = json_request.get('marketplace_id')
-#     brand_id = json_request.get('brand_id', [])
-#     product_id = json_request.get('product_id', [])
-#     manufacturer_name = json_request.get('manufacturer_name', [])
-#     fulfillment_channel = json_request.get('fulfillment_channel')
-#     preset = json_request.get('preset')
-
-#     start_date = json_request.get("start_date")
-#     end_date = json_request.get("end_date")
-
-#     # =========================================================
-#     # DATE LOGIC (STANDARDIZED - SAME AS YOUR OTHER APIs)
-#     # =========================================================
-#     def parse_date(d):
-#         return datetime.strptime(d, "%d/%m/%Y").date()
-
-#     if start_date and end_date:
-#         from_date = parse_date(start_date)
-#         to_date = parse_date(end_date)
-#     else:
-#         from_date, to_date = get_date_range(preset)
-
-#     # previous period
-#     duration = to_date - from_date
-#     prev_from = from_date - duration
-#     prev_to = to_date - duration
-
-#     # convert to ClickHouse format (DATE ONLY)
-#     from_date = from_date.strftime("%Y-%m-%d")
-#     to_date = to_date.strftime("%Y-%m-%d")
-#     prev_from = prev_from.strftime("%Y-%m-%d")
-#     prev_to = prev_to.strftime("%Y-%m-%d")
-
-#     # =========================================================
-#     # FILTER BUILDER
-#     # =========================================================
-#     def build_filters():
-#         filters = [
-#             "order_date_day BETWEEN {start:Date} AND {end:Date}"
-#         ]
-
-#         params = {
-#             "start": from_date,
-#             "end": to_date,
-#         }
-
-#         if marketplace_id and marketplace_id != "all":
-#             filters.append("toString(marketplace_id) = {marketplace:String}")
-#             params["marketplace"] = marketplace_id
-
-#         if fulfillment_channel:
-#             filters.append("fulfillment_channel = {channel:String}")
-#             params["channel"] = fulfillment_channel
-
-#         if brand_id:
-#             filters.append("brand_id IN {brand:Array(String)}")
-#             params["brand"] = brand_id
-
-#         if product_id:
-#             filters.append("product_id IN {products:Array(String)}")
-#             params["products"] = product_id
-
-#         if manufacturer_name:
-#             filters.append("manufacturer_name IN {mfg:Array(String)}")
-#             params["mfg"] = manufacturer_name
-
-#         return " AND ".join(filters), params
-
-#     where_clause, params = build_filters()
-
-#     # =========================================================
-#     # CLICKHOUSE QUERY TEMPLATE
-#     # =========================================================
-#     query = f"""
-#     SELECT
-#         sum(order_total) as gross,
-#         sum(shipping_price) as shipping,
-#         sum(item_tax) as tax,
-#         sum(item_price * quantity) as revenue,
-
-#         sum(product_cost * quantity) as cogs,
-#         sum(vendor_funding * quantity) as vendor_funding,
-#         sum(vendor_discount) as vendor_discount,
-
-#         sum(promotion_discount) as promo,
-#         sum(ship_promotion_discount) as ship_promo,
-
-#         sum(referral_fee * quantity) as channel_fee,
-#         sum(quantity) as units,
-#         uniqExact(sku) as sku_count
-#     FROM fact_order_items
-#     WHERE {where_clause}
-#     """
-
-#     # =========================================================
-#     # FETCH FUNCTION
-#     # =========================================================
-#     def fetch(start, end):
-#         p = dict(params)
-#         p["start"] = start
-#         p["end"] = end
-
-#         result = client.query(query, parameters=p).result_rows
-#         row = result[0] if result else (0,) * 12
-
-#         gross = float(row[0] or 0)
-#         shipping = float(row[1] or 0)
-#         tax = float(row[2] or 0)
-#         revenue = float(row[3] or 0)
-
-#         cogs = float(row[4] or 0)
-#         vendor_funding = float(row[5] or 0)
-#         vendor_discount = float(row[6] or 0)
-
-#         promo = float(row[7] or 0)
-#         ship_promo = float(row[8] or 0)
-#         channel_fee = float(row[9] or 0)
-
-#         units = int(row[10] or 0)
-#         sku_count = int(row[11] or 0)
-
-#         expenses = cogs + channel_fee + vendor_discount + ship_promo
-
-#         net_profit = revenue + shipping + promo + vendor_funding - expenses
-
-#         margin = (net_profit / gross) * 100 if gross else 0
-#         roi = (net_profit / expenses) * 100 if expenses else 0
-
-#         return {
-#             "grossRevenue": round(gross, 2),
-#             "netProfit": round(net_profit, 2),
-#             "expenses": round(expenses, 2),
-#             "unitsSold": units,
-#             "skuCount": sku_count,
-#             "margin": round(margin, 2),
-#             "roi": round(roi, 2),
-
-#             "shipping_cost": round(shipping, 2),
-#             "tax_price": round(tax, 2),
-#             "base_price": round(revenue, 2),
-#             "cogs": round(cogs, 2),
-#             "channel_fee": round(channel_fee, 2),
-#             "productRefunds": 0
-#         }
-
-#     # =========================================================
-#     # EXECUTION
-#     # =========================================================
-#     current = fetch(from_date, to_date)
-#     previous = fetch(prev_from, prev_to)
-
-#     def delta(metric):
-#         return {
-#             "current": current.get(metric, 0),
-#             "previous": previous.get(metric, 0),
-#             "delta": round(current.get(metric, 0) - previous.get(metric, 0), 2)
-#         }
-
-#     response_data = {
-#         "custom": {
-#             "summary": {
-#                 k: delta(k) for k in [
-#                     "grossRevenue",
-#                     "netProfit",
-#                     "expenses",
-#                     "unitsSold",
-#                     "skuCount",
-#                     "margin",
-#                     "roi"
-#                 ]
-#             },
-#             "netProfitCalculation": {
-#                 "current": current,
-#                 "previous": previous
-#             }
-#         },
-#         "from_date": from_date,
-#         "to_date": to_date
-#     }
-
-#     return JsonResponse(response_data, safe=False)
-
 @csrf_exempt
 def getProfitAndLossDetails(request):
     import time
     from rest_framework.parsers import JSONParser
-    from datetime import datetime
+    from datetime import datetime, timedelta
     from django.http import JsonResponse
 
     json_request = JSONParser().parse(request)
@@ -6626,9 +6436,14 @@ def getProfitAndLossDetails(request):
     else:
         from_date, to_date = get_date_range(preset)
 
-    duration = to_date - from_date
-    prev_from = from_date - duration
-    prev_to = to_date - duration
+    # =========================================================
+    # SAME PREVIOUS-DATE LOGIC AS get_metrics_by_date_range_clickhouse
+    # =========================================================
+    previous_start = from_date - timedelta(days=1)
+    previous_end = to_date - timedelta(days=1)
+
+    prev_from = previous_start
+    prev_to = previous_end
 
     from_date = from_date.strftime("%Y-%m-%d")
     to_date = to_date.strftime("%Y-%m-%d")
@@ -6671,7 +6486,7 @@ def getProfitAndLossDetails(request):
     where_clause, params = build_filters()
 
     # =========================================================
-    # QUERY (FIXED TO MATCH GET_METRICS LOGIC)
+    # QUERY (UNCHANGED)
     # =========================================================
     query = f"""
     SELECT
@@ -6724,12 +6539,12 @@ def getProfitAndLossDetails(request):
         vendor_discount = float(row[11] or 0)
 
         # =====================================================
-        # EXPENSES (MATCH GET_METRICS)
+        # EXPENSES
         # =====================================================
         expenses = cogs + channel_fee
 
         # =====================================================
-        # NET PROFIT (EXACT SAME LOGIC AS WORKING API)
+        # NET PROFIT
         # =====================================================
         net_profit = (
             item_price +
@@ -6764,7 +6579,7 @@ def getProfitAndLossDetails(request):
         }
 
     # =========================================================
-    # EXECUTION (UNCHANGED)
+    # EXECUTION
     # =========================================================
     current = fetch(from_date, to_date)
     previous = fetch(prev_from, prev_to)
@@ -6799,6 +6614,7 @@ def getProfitAndLossDetails(request):
     }
 
     return JsonResponse(response_data, safe=False)
+
 
 # @csrf_exempt
 # def profit_loss_chart(request):
