@@ -158,6 +158,7 @@ def drop_fact_order_items_table(request):
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+
 @csrf_exempt
 def get_metrics_by_date_range_clickhouse(request):
 
@@ -180,7 +181,10 @@ def get_metrics_by_date_range_clickhouse(request):
     def to_clickhouse_date(d):
         return d.strftime("%Y-%m-%d")
 
-    where_clauses = ["order_date_day BETWEEN {start:Date} AND {end:Date}"]
+    where_clauses = [
+        "order_date_day BETWEEN {start:Date} AND {end:Date}",
+        "order_status NOT IN ('Canceled','Cancelled')",
+    ]
 
     params = {
         "start": to_clickhouse_date(start_date),
@@ -220,9 +224,7 @@ def get_metrics_by_date_range_clickhouse(request):
     graph_rows = client.query(graph_query, parameters=params).result_rows
 
     graph_data = {
-        r[0].strftime("%B %d, %Y").lower(): {
-            "gross_revenue_with_tax": round(r[1], 2)
-        }
+        r[0].strftime("%B %d, %Y").lower(): {"gross_revenue_with_tax": round(r[1], 2)}
         for r in graph_rows
     }
 
@@ -305,19 +307,9 @@ def get_metrics_by_date_range_clickhouse(request):
 
         expense = cogs + channel_fees
 
-        revenue_side = (
-            item_price
-            + shipping_price
-            + vendor_funding
-            + promo_discount
-        )
+        revenue_side = item_price + shipping_price + vendor_funding + promo_discount
 
-        cost_side = (
-            channel_fees
-            + cogs
-            + vendor_discount
-            + ship_promo_discount
-        )
+        cost_side = channel_fees + cogs + vendor_discount + ship_promo_discount
 
         net_profit = revenue_side - cost_side
 

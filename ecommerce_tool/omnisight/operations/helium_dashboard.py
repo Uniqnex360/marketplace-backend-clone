@@ -1203,18 +1203,25 @@ def RevenueWidgetAPIView(request):
 #                 if not item_result.get(field, True):
 #                     data['total'].pop(field, None)
 #     return data
+
 def clickhouse_total_revenue(start_date, end_date, filters):
 
     query = f"""
     SELECT
-        sum(item_price * quantity) AS gross_revenue_with_tax,
+        sum(gross_revenue) AS gross_revenue_with_tax,
 
-        sum(
-            (item_price * quantity)
-            - coalesce(product_cost * quantity, 0)
-            - coalesce(referral_fee * quantity, 0)
-            - coalesce(vendor_discount, 0)
-            - coalesce(ship_promotion_discount, 0)
+        (
+            sum(item_price)
+            + sum(shipping_price)
+            + sum(vendor_funding)
+            + sum(promotion_discount)
+
+            - (
+                sum(referral_fee)
+                + sum(product_cost * quantity + merchant_shipment_cost)
+                + sum(vendor_discount)
+                + sum(ship_promotion_discount)
+            )
         ) AS net_profit,
 
         sum(quantity) AS units_sold,
@@ -1224,10 +1231,13 @@ def clickhouse_total_revenue(start_date, end_date, filters):
     FROM fact_order_items
     WHERE order_date >= toDateTime('{start_date}')
       AND order_date < toDateTime('{end_date}')
+      AND order_status NOT IN ('Canceled','Cancelled')
     """
+
     marketplace_id = filters.get("marketplace_id")
+
     if marketplace_id and marketplace_id != "all":
-        query += f" AND marketplace_id = '{filters['marketplace_id']}'"
+        query += f" AND marketplace_id = '{marketplace_id}'"
 
     if filters.get("brand_id"):
         query += f" AND brand_id IN {tuple(filters['brand_id'])}"
@@ -1256,16 +1266,22 @@ def clickhouse_total_revenue(start_date, end_date, filters):
         "net_profit": net,
         "units_sold": row[2] or 0,
         "orders": row[3] or 0,
-        "refund_amount": 0,        # if not in CH yet
-        "refund_quantity": 0,      # if not in CH yet
-        "profit_margin": round((net / gross) * 100, 2) if gross else 0
+        "refund_amount": 0,
+        "refund_quantity": 0,
+        "profit_margin": round((net / gross) * 100, 2) if gross else 0,
     }
 
-
-def clickhouse_graph_query(start_date, end_date, preset,
-                           marketplace_id, brand_id=None,
-                           product_id=None, manufacturer_name=None,
-                           fulfillment_channel=None, timezone="UTC"):
+def clickhouse_graph_query(
+    start_date,
+    end_date,
+    preset,
+    marketplace_id,
+    brand_id=None,
+    product_id=None,
+    manufacturer_name=None,
+    fulfillment_channel=None,
+    timezone="UTC",
+):
 
     time_format = "%Y-%m-%d %H:00:00"
 
@@ -1273,14 +1289,20 @@ def clickhouse_graph_query(start_date, end_date, preset,
     SELECT
         formatDateTime(order_date, '{time_format}') AS bucket,
 
-        sum(item_price * quantity) AS gross_revenue_with_tax,
+        sum(gross_revenue) AS gross_revenue_with_tax,
 
-        sum(
-            (item_price * quantity)
-            - coalesce(product_cost * quantity, 0)
-            - coalesce(referral_fee * quantity, 0)
-            - coalesce(vendor_discount, 0)
-            - coalesce(ship_promotion_discount, 0)
+        (
+            sum(item_price)
+            + sum(shipping_price)
+            + sum(vendor_funding)
+            + sum(promotion_discount)
+
+            - (
+                sum(referral_fee)
+                + sum(product_cost * quantity + merchant_shipment_cost)
+                + sum(vendor_discount)
+                + sum(ship_promotion_discount)
+            )
         ) AS net_profit,
 
         uniq(order_id) AS orders,
@@ -1290,6 +1312,25 @@ def clickhouse_graph_query(start_date, end_date, preset,
     FROM fact_order_items
     WHERE order_date >= toDateTime('{start_date}')
       AND order_date < toDateTime('{end_date}')
+      AND order_status NOT IN ('Canceled','Cancelled')
+    """
+
+    if marketplace_id and marketplace_id != "all":
+        query += f" AND marketplace_id = '{marketplace_id}'"
+
+    if brand_id:
+        query += f" AND brand_id IN {tuple(brand_id)}"
+
+    if product_id:
+        query += f" AND product_id IN {tuple(product_id)}"
+
+    if manufacturer_name:
+        query += f" AND manufacturer_name IN {tuple(manufacturer_name)}"
+
+    if fulfillment_channel:
+        query += f" AND fulfillment_channel = '{fulfillment_channel}'"
+
+    query += """
     GROUP BY bucket
     ORDER BY bucket
     """
@@ -1317,7 +1358,6 @@ def clickhouse_graph_query(start_date, end_date, preset,
         }
 
     return graph
-
 
 # @csrf_exempt
 # def updatedRevenueWidgetAPIView(request):
@@ -1566,7 +1606,8 @@ def updatedRevenueWidgetAPIView(request):
     def build_where(start_dt, end_dt):
 
         where_clauses = [
-            "order_date_day BETWEEN {start:Date} AND {end:Date}"
+            "order_date_day BETWEEN {start:Date} AND {end:Date}",
+            "order_status NOT IN ('Canceled','Cancelled')"
         ]
 
         params = {
@@ -2980,7 +3021,8 @@ def fetch_clickhouse_metrics(from_date, to_date, marketplace_id,
 
     where = [
         f"order_date >= toDateTime('{from_date}')",
-        f"order_date <= toDateTime('{to_date}')"
+        f"order_date <= toDateTime('{to_date}')",
+        "order_status NOT IN ('Canceled','Cancelled')",
     ]
 
     if marketplace_id and marketplace_id != "all":
@@ -4038,34 +4080,70 @@ def getPeriodWiseDataCustom(request):
     # =========================================================
     # NET PROFIT (UNCHANGED)
     # =========================================================
+    # def compute_net(metrics):
+
+    #     gross = metrics["grossRevenue"]
+
+    #     expenses = (
+    #         metrics["total_product_cost"]
+    #         + metrics["referral_fee"]
+    #         + metrics["vendor_discount"]
+    #         + metrics["ship_promotion_discount"]
+    #         + metrics["merchant_cost"]
+    #     )
+
+    #     net_profit = (
+    #         metrics["net_item_revenue"]
+    #         + metrics["shipping_cost"]
+    #         + metrics["promotion_discount"]
+    #         + metrics["vendor_funding"]
+    #         - expenses
+    #     )
+
+    #     return {
+    #         "gross": gross,
+    #         "totalCosts": expenses,
+    #         "productRefunds": 0,
+    #         "totalTax": metrics["tax_price"],
+    #         "netProfit": net_profit
+    #     }
     def compute_net(metrics):
 
         gross = metrics["grossRevenue"]
 
-        expenses = (
-            metrics["total_product_cost"]
-            + metrics["referral_fee"]
-            + metrics["vendor_discount"]
-            + metrics["ship_promotion_discount"]
-            + metrics["merchant_cost"]
+        net_profit = (
+            metrics["item_price"]
+            + metrics["shipping_cost"]
+            + metrics["vendor_funding"]
+            + metrics["promotion_discount"]
+            - (
+                metrics["referral_fee"]
+                + (
+                    metrics["total_product_cost"]
+                    + metrics["merchant_cost"]
+                )
+                + metrics["vendor_discount"]
+                + metrics["ship_promotion_discount"]
+            )
         )
 
-        net_profit = (
-            metrics["net_item_revenue"]
-            + metrics["shipping_cost"]
-            + metrics["promotion_discount"]
-            + metrics["vendor_funding"]
-            - expenses
+        total_costs = (
+            metrics["referral_fee"]
+            + metrics["total_product_cost"]
+            + metrics["merchant_cost"]
+            + metrics["vendor_discount"]
+            + metrics["ship_promotion_discount"]
         )
 
         return {
-            "gross": gross,
-            "totalCosts": expenses,
+            "gross": round(gross, 2),
+            "totalCosts": round(total_costs, 2),
             "productRefunds": 0,
-            "totalTax": metrics["tax_price"],
-            "netProfit": net_profit
+            "totalTax": round(metrics["tax_price"], 2),
+            "netProfit": round(net_profit, 2),
         }
 
+    
     # =========================================================
     # RESPONSE BUILDER (UNCHANGED)
     # =========================================================
@@ -6454,7 +6532,10 @@ def getProfitAndLossDetails(request):
     # FILTERS (UNCHANGED)
     # =========================================================
     def build_filters():
-        filters = ["order_date_day BETWEEN {start:Date} AND {end:Date}"]
+        filters = [
+            "order_date_day BETWEEN {start:Date} AND {end:Date}",
+            "order_status NOT IN ('Canceled','Cancelled')",
+            ]
 
         params = {
             "start": from_date,

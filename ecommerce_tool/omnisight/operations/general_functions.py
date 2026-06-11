@@ -1514,7 +1514,8 @@ def ordersCountForDashboard(request):
     # BASE WHERE
     # -----------------------------
     where = [
-        "order_date_day BETWEEN {start:Date} AND {end:Date}"
+        "order_date_day BETWEEN {start:Date} AND {end:Date}",
+        "order_status NOT IN ('Canceled','Cancelled')",
     ]
 
     params = {
