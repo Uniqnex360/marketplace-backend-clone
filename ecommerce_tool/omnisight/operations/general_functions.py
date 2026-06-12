@@ -586,10 +586,11 @@ def fetchAllorders(request):
     )
     return Response(data)
 
+import time
 
 def fetchOrderDetails(request):
+    start_time = time.time()
     data = {}
-    user_id = request.GET.get("user_id")
     order_id = request.GET.get("order_id")
     pipeline = [
         {"$match": {"_id": ObjectId(order_id)}},
@@ -835,6 +836,7 @@ def fetchOrderDetails(request):
             data["order_items"] = serialized_items
         else:
             data["order_items"] = []
+    print("total time", time.time() - start_time)
     return data
 
 
