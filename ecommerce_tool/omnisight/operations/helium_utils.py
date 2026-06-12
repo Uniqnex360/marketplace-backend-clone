@@ -148,52 +148,144 @@ def getproductIdListBasedonManufacture(manufactureName = [],start_date=None, end
     return orders
 
 
-def get_date_range(preset, time_zone_str="UTC"):
+# def get_date_range(preset, time_zone_str="UTC"):
+#     tz = timezone(time_zone_str)
+#     now = datetime.now(tz)
+#     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+#     if preset == "Today":
+#         start = today
+#         return start, start.replace(hour=23, minute=59, second=59)
+#     elif preset == "Yesterday":
+#         start = today - timedelta(days=1)
+#         return start, start.replace(hour=23, minute=59, second=59)
+#     elif preset == "This Week":
+#         start = today - timedelta(days=today.weekday())
+#         return start, today.replace(hour=23, minute=59, second=59)
+#     elif preset == "This Month":
+#         start = today.replace(day=1)
+#         return start, today.replace(hour=23, minute=59, second=59)
+#     elif preset == "This Year":
+#         return today.replace(month=1, day=1), today.replace(hour=23, minute=59, second=59)
+#     elif preset == "Last Week":
+#         start = today - timedelta(days=today.weekday() + 7)
+#         end = start + timedelta(days=6)
+#         return start.replace(hour=0, minute=0, second=0, microsecond=0), end.replace(hour=23, minute=59, second=59)
+#     elif preset == "Last 7 days":
+#         return today - timedelta(days=7), (today - timedelta(days=1)).replace(hour=23, minute=59, second=59)
+#     elif preset == "Last 14 days":
+#         return today - timedelta(days=14), (today - timedelta(days=1)).replace(hour=23, minute=59, second=59)
+#     elif preset == "Last 30 days":
+#         return today - timedelta(days=30), (today - timedelta(days=1)).replace(hour=23, minute=59, second=59)
+#     elif preset == "Last 60 days":
+#         return today - timedelta(days=60), (today - timedelta(days=1)).replace(hour=23, minute=59, second=59)
+#     elif preset == "Last 90 days":
+#         return today - timedelta(days=90), (today - timedelta(days=1)).replace(hour=23, minute=59, second=59)
+#     elif preset == "Last Month":
+#         start = (today.replace(day=1) - relativedelta(months=1))
+#         return start, (today.replace(day=1) - timedelta(days=1)).replace(hour=23, minute=59, second=59)
+#     elif preset == "This Quarter":
+#         quarter = (today.month - 1) // 3
+#         start = today.replace(month=quarter * 3 + 1, day=1)
+#         return start, (start + relativedelta(months=3) - timedelta(days=1)).replace(hour=23, minute=59, second=59)
+#     elif preset == "Last Quarter":
+#         quarter = ((today.month - 1) // 3) - 1
+#         start = today.replace(month=quarter * 3 + 1, day=1)
+#         return start, (start + relativedelta(months=3) - timedelta(days=1)).replace(hour=23, minute=59, second=59)
+#     elif preset == "Last Year":
+#         return today.replace(year=today.year - 1, month=1, day=1), today.replace(year=today.year - 1, month=12, day=31, hour=23, minute=59, second=59)
+#     return today, (today + timedelta(days=1)).replace(hour=23, minute=59, second=59)
+
+
+USE_REFERENCE_DATE = True
+REFERENCE_DATE = "09/06/2026" 
+
+
+def get_date_range(
+    preset,
+    time_zone_str="UTC",
+    use_reference_date=USE_REFERENCE_DATE,
+    reference_date_str=REFERENCE_DATE,
+):
     tz = timezone(time_zone_str)
-    now = datetime.now(tz)
-    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    if use_reference_date:
+        reference_date = datetime.strptime(
+            reference_date_str, "%d/%m/%Y"
+        )
+        today = tz.localize(
+            reference_date.replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+        )
+    else:
+        now = datetime.now(tz)
+        today = now.replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+
     if preset == "Today":
         start = today
         return start, start.replace(hour=23, minute=59, second=59)
+
     elif preset == "Yesterday":
         start = today - timedelta(days=1)
         return start, start.replace(hour=23, minute=59, second=59)
+
     elif preset == "This Week":
         start = today - timedelta(days=today.weekday())
         return start, today.replace(hour=23, minute=59, second=59)
+
     elif preset == "This Month":
         start = today.replace(day=1)
         return start, today.replace(hour=23, minute=59, second=59)
+
     elif preset == "This Year":
-        return today.replace(month=1, day=1), today.replace(hour=23, minute=59, second=59)
+        return (
+            today.replace(month=1, day=1),
+            today.replace(hour=23, minute=59, second=59),
+        )
+
     elif preset == "Last Week":
         start = today - timedelta(days=today.weekday() + 7)
         end = start + timedelta(days=6)
-        return start.replace(hour=0, minute=0, second=0, microsecond=0), end.replace(hour=23, minute=59, second=59)
+        return (
+            start.replace(hour=0, minute=0, second=0, microsecond=0),
+            end.replace(hour=23, minute=59, second=59),
+        )
+
     elif preset == "Last 7 days":
-        return today - timedelta(days=7), (today - timedelta(days=1)).replace(hour=23, minute=59, second=59)
+        return (
+            today - timedelta(days=7),
+            (today - timedelta(days=1)).replace(
+                hour=23, minute=59, second=59
+            ),
+        )
+
     elif preset == "Last 14 days":
-        return today - timedelta(days=14), (today - timedelta(days=1)).replace(hour=23, minute=59, second=59)
+        return (
+            today - timedelta(days=14),
+            (today - timedelta(days=1)).replace(
+                hour=23, minute=59, second=59
+            ),
+        )
+
     elif preset == "Last 30 days":
-        return today - timedelta(days=30), (today - timedelta(days=1)).replace(hour=23, minute=59, second=59)
-    elif preset == "Last 60 days":
-        return today - timedelta(days=60), (today - timedelta(days=1)).replace(hour=23, minute=59, second=59)
-    elif preset == "Last 90 days":
-        return today - timedelta(days=90), (today - timedelta(days=1)).replace(hour=23, minute=59, second=59)
+        return (
+            today - timedelta(days=30),
+            (today - timedelta(days=1)).replace(
+                hour=23, minute=59, second=59
+            ),
+        )
+
     elif preset == "Last Month":
-        start = (today.replace(day=1) - relativedelta(months=1))
-        return start, (today.replace(day=1) - timedelta(days=1)).replace(hour=23, minute=59, second=59)
-    elif preset == "This Quarter":
-        quarter = (today.month - 1) // 3
-        start = today.replace(month=quarter * 3 + 1, day=1)
-        return start, (start + relativedelta(months=3) - timedelta(days=1)).replace(hour=23, minute=59, second=59)
-    elif preset == "Last Quarter":
-        quarter = ((today.month - 1) // 3) - 1
-        start = today.replace(month=quarter * 3 + 1, day=1)
-        return start, (start + relativedelta(months=3) - timedelta(days=1)).replace(hour=23, minute=59, second=59)
-    elif preset == "Last Year":
-        return today.replace(year=today.year - 1, month=1, day=1), today.replace(year=today.year - 1, month=12, day=31, hour=23, minute=59, second=59)
-    return today, (today + timedelta(days=1)).replace(hour=23, minute=59, second=59)
+        start = today.replace(day=1) - relativedelta(months=1)
+        end = today.replace(day=1) - timedelta(days=1)
+        return (
+            start,
+            end.replace(hour=23, minute=59, second=59),
+        )
+
+    return today, today.replace(hour=23, minute=59, second=59)
 
 
 # def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None, 
