@@ -244,7 +244,6 @@ logger.setLevel(logging.INFO)
 #     return response_data
 
 
-
 @csrf_exempt
 def all_market_place_data_clickhouse(request):
     overall_start = time.time()
@@ -277,7 +276,10 @@ def all_market_place_data_clickhouse(request):
     # FILTERS
     # =========================================================
     def build_filters():
-        filters = ["order_date_day BETWEEN {start:Date} AND {end:Date}"]
+        filters = [
+            "order_status NOT IN ('Canceled', 'Cancelled')",
+            "order_date_day BETWEEN {start:Date} AND {end:Date}",
+        ]
 
         params = {
             "start": from_date,
@@ -327,16 +329,8 @@ def all_market_place_data_clickhouse(request):
         ship_promo = row.get("ship_promotion_discount", 0) or 0
 
         net_profit = (
-            item_price +
-            shipping_price +
-            promotion_discount +
-            vendor_funding
-        ) - (
-            channel_fees +
-            cogs +
-            vendor_discount +
-            ship_promo
-        )
+            item_price + shipping_price + promotion_discount + vendor_funding
+        ) - (channel_fees + cogs + vendor_discount + ship_promo)
 
         expenses = cogs + channel_fees
 
@@ -408,7 +402,9 @@ def all_market_place_data_clickhouse(request):
     # =========================================================
     all_marketplace_raw = safe_first(current_result)
 
-    gross, cogs, channel_fees, net_profit, expenses = compute_finance(all_marketplace_raw)
+    gross, cogs, channel_fees, net_profit, expenses = compute_finance(
+        all_marketplace_raw
+    )
 
     all_marketplace = {
         **all_marketplace_raw,
@@ -440,7 +436,9 @@ def all_market_place_data_clickhouse(request):
                         "total_cogs": cogs,
                         "netProfit": net_profit,
                         "margin": round((net_profit / gross) * 100, 2) if gross else 0,
-                        "roi": round((net_profit / expenses) * 100, 2) if expenses else 0,
+                        "roi": (
+                            round((net_profit / expenses) * 100, 2) if expenses else 0
+                        ),
                     }
                 ],
             }

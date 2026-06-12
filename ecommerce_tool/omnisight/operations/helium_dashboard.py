@@ -3893,7 +3893,6 @@ def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     return str(dt)
 
-from clickhouse.config import client
 
 @csrf_exempt
 def getPeriodWiseDataCustom(request):
@@ -3993,14 +3992,15 @@ def getPeriodWiseDataCustom(request):
         query = f"""
         SELECT
             round(sum(gross_revenue), 2) AS grossRevenue,
+            round(sum(item_price), 2) AS item_price,
             round(sum(net_item_revenue), 2) AS netRevenue,
             sum(quantity) AS unitsSold,
             uniqExact(purchase_order_id) AS orders,
             uniqExact(sku) AS skuCount,
             round(sum(item_tax), 2) AS tax_price,
             round(sum(product_cost * quantity), 2) AS total_product_cost,
-            round(sum(referral_fee * quantity), 2) AS referral_fee,
-            round(sum(vendor_funding * quantity), 2) AS vendor_funding,
+            round(sum(referral_fee), 2) AS referral_fee,
+            round(sum(vendor_funding), 2) AS vendor_funding,
             round(sum(vendor_discount), 2) AS vendor_discount,
             round(sum(promotion_discount), 2) AS promotion_discount,
             round(sum(ship_promotion_discount), 2) AS ship_promotion_discount,
@@ -4015,19 +4015,22 @@ def getPeriodWiseDataCustom(request):
 
         return {
             "grossRevenue": row[0] or 0,
-            "net_item_revenue": row[1] or 0,
-            "unitsSold": row[2] or 0,
-            "orders": row[3] or 0,
-            "skuCount": row[4] or 0,
-            "tax_price": row[5] or 0,
-            "total_product_cost": row[6] or 0,
-            "referral_fee": row[7] or 0,
-            "vendor_funding": row[8] or 0,
-            "vendor_discount": row[9] or 0,
-            "promotion_discount": row[10] or 0,
-            "ship_promotion_discount": row[11] or 0,
-            "shipping_cost": row[12] or 0,
-            "merchant_cost": row[13] or 0,
+            "item_price": row[1] or 0,
+            "net_item_revenue": row[2] or 0,
+
+            "unitsSold": row[3] or 0,
+            "orders": row[4] or 0,
+            "skuCount": row[5] or 0,
+
+            "tax_price": row[6] or 0,
+            "total_product_cost": row[7] or 0,
+            "referral_fee": row[8] or 0,
+            "vendor_funding": row[9] or 0,
+            "vendor_discount": row[10] or 0,
+            "promotion_discount": row[11] or 0,
+            "ship_promotion_discount": row[12] or 0,
+            "shipping_cost": row[13] or 0,
+            "merchant_cost": row[14] or 0,
         }
 
     # =========================================================
@@ -4077,39 +4080,50 @@ def getPeriodWiseDataCustom(request):
 
         return {m: f(m) for m in summary_metrics}
 
-    # =========================================================
-    # NET PROFIT (UNCHANGED)
-    # =========================================================
     # def compute_net(metrics):
 
     #     gross = metrics["grossRevenue"]
 
-    #     expenses = (
-    #         metrics["total_product_cost"]
-    #         + metrics["referral_fee"]
-    #         + metrics["vendor_discount"]
-    #         + metrics["ship_promotion_discount"]
-    #         + metrics["merchant_cost"]
-    #     )
-
     #     net_profit = (
     #         metrics["net_item_revenue"]
     #         + metrics["shipping_cost"]
-    #         + metrics["promotion_discount"]
     #         + metrics["vendor_funding"]
-    #         - expenses
+    #         + metrics["promotion_discount"]
+    #         - (
+    #             metrics["referral_fee"]
+    #             + (
+    #                 metrics["total_product_cost"]
+    #                 + metrics["merchant_cost"]
+    #             )
+    #             + metrics["vendor_discount"]
+    #             + metrics["ship_promotion_discount"]
+    #         )
+    #     )
+
+    #     total_costs = (
+    #         metrics["referral_fee"]
+    #         + metrics["total_product_cost"]
+    #         + metrics["merchant_cost"]
+    #         + metrics["vendor_discount"]
+    #         + metrics["ship_promotion_discount"]
     #     )
 
     #     return {
-    #         "gross": gross,
-    #         "totalCosts": expenses,
+    #         "gross": round(gross, 2),
+    #         "totalCosts": round(total_costs, 2),
     #         "productRefunds": 0,
-    #         "totalTax": metrics["tax_price"],
-    #         "netProfit": net_profit
+    #         "totalTax": round(metrics["tax_price"], 2),
+    #         "netProfit": round(net_profit, 2),
     #     }
+
     def compute_net(metrics):
 
         gross = metrics["grossRevenue"]
+
+        cogs = (
+            metrics["total_product_cost"]
+            + metrics["merchant_cost"]
+        )
 
         net_profit = (
             metrics["item_price"]
@@ -4118,10 +4132,7 @@ def getPeriodWiseDataCustom(request):
             + metrics["promotion_discount"]
             - (
                 metrics["referral_fee"]
-                + (
-                    metrics["total_product_cost"]
-                    + metrics["merchant_cost"]
-                )
+                + cogs
                 + metrics["vendor_discount"]
                 + metrics["ship_promotion_discount"]
             )
@@ -4129,10 +4140,7 @@ def getPeriodWiseDataCustom(request):
 
         total_costs = (
             metrics["referral_fee"]
-            + metrics["total_product_cost"]
-            + metrics["merchant_cost"]
-            + metrics["vendor_discount"]
-            + metrics["ship_promotion_discount"]
+            + cogs
         )
 
         return {
