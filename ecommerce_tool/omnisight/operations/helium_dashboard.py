@@ -3818,7 +3818,7 @@ def getPeriodWiseDataCustom(request):
             round(sum(item_price), 2) AS item_price,
             round(sum(net_item_revenue), 2) AS netRevenue,
             sum(quantity) AS unitsSold,
-            uniqExact(purchase_order_id) AS orders,
+            uniqExact(order_id) AS orders,
             uniqExact(sku) AS skuCount,
             round(sum(item_tax), 2) AS tax_price,
             round(sum(product_cost * quantity), 2) AS total_product_cost,
