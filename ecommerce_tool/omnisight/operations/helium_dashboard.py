@@ -5182,15 +5182,8 @@ def getProductPerformanceSummary(request):
     end_date_str = json_request.get("end_date")
 
     if start_date_str and end_date_str:
-        start_date = datetime.strptime(
-            start_date_str,
-            "%d/%m/%Y"
-        ).date()
-
-        end_date = datetime.strptime(
-            end_date_str,
-            "%d/%m/%Y"
-        ).date()
+        start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+        end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
     else:
         start_date, end_date = get_date_range(preset)
 
@@ -6337,12 +6330,10 @@ def getProfitAndLossDetails(request):
     start_date = json_request.get("start_date")
     end_date = json_request.get("end_date")
 
-    def parse_date(d):
-        return datetime.strptime(d, "%d/%m/%Y").date()
 
     if start_date and end_date:
-        from_date = parse_date(start_date)
-        to_date = parse_date(end_date)
+        from_date = datetime.strptime(start_date, "%Y-%m-%d").date()
+        to_date = datetime.strptime(end_date, "%Y-%m-%d").date()
     else:
         from_date, to_date = get_date_range(preset)
 

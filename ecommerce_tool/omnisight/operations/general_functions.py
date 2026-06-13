@@ -1504,8 +1504,8 @@ def ordersCountForDashboard(request):
         return d.strftime("%Y-%m-%d")
 
     if start_date and end_date:
-        start_date = datetime.strptime(start_date, "%d/%m/%Y").date()
-        end_date = datetime.strptime(end_date, "%d/%m/%Y").date()
+        start_date = datetime.strptime(start_date, "%Y-%m-%d").date()
+        end_date = datetime.strptime(end_date, "%Y-%m-%d").date()
     else:
         start_date, end_date = get_date_range(preset)
 
