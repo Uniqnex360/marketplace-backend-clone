@@ -3733,20 +3733,29 @@ def getPeriodWiseDataCustom(request):
     # =========================================================
     # FIX 1: KEEP TIMEZONE ONLY FOR UI / RANGE CALCULATION
     # =========================================================
+    # if start_date:
+    #     local_tz = pytz.timezone(timezone_str)
+    #     naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
+    #     naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
+
+    #     localized_from_date = local_tz.localize(naive_from_date)
+    #     localized_to_date = local_tz.localize(
+    #         naive_to_date.replace(hour=23, minute=59, second=59)
+    #     )
+
+    #     from_date = localized_from_date.astimezone(pytz.UTC)
+    #     to_date = localized_to_date.astimezone(pytz.UTC)
+    # else:
+    #     from_date, to_date = get_date_range(preset, timezone_str)
     if start_date:
-        local_tz = pytz.timezone(timezone_str)
-        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
-
-        localized_from_date = local_tz.localize(naive_from_date)
-        localized_to_date = local_tz.localize(
-            naive_to_date.replace(hour=23, minute=59, second=59)
-        )
-
-        from_date = localized_from_date.astimezone(pytz.UTC)
-        to_date = localized_to_date.astimezone(pytz.UTC)
+        from_date = datetime.strptime(start_date, "%Y-%m-%d").date()
+        to_date = datetime.strptime(end_date, "%Y-%m-%d").date()
     else:
         from_date, to_date = get_date_range(preset, timezone_str)
+
+        # if get_date_range returns datetime objects
+        from_date = from_date.date()
+        to_date = to_date.date()
 
     duration = to_date - from_date
     prev_from, prev_to = from_date - duration, to_date - duration
@@ -3860,6 +3869,13 @@ def getPeriodWiseDataCustom(request):
     # MONGO SESSIONS (UNCHANGED)
     # =========================================================
     def fetch_sessions(start_dt, end_dt):
+        from datetime import date, time
+
+        if isinstance(start_dt, date) and not isinstance(start_dt, datetime):
+            start_dt = datetime.combine(start_dt, time.min)
+
+        if isinstance(end_dt, date) and not isinstance(end_dt, datetime):
+            end_dt = datetime.combine(end_dt, time.max)
 
         pipeline = [
             {
