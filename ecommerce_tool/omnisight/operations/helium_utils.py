@@ -276,6 +276,22 @@ def get_date_range(
                 hour=23, minute=59, second=59
             ),
         )
+    
+    elif preset == "Last 60 days":
+        return (
+            today - timedelta(days=60),
+            (today - timedelta(days=1)).replace(
+                hour=23, minute=59, second=59
+            ),
+        )
+    
+    elif preset == "Last 90 days":
+        return (
+            today - timedelta(days=90),
+            (today - timedelta(days=1)).replace(
+                hour=23, minute=59, second=59
+            ),
+        )
 
     elif preset == "Last Month":
         start = today.replace(day=1) - relativedelta(months=1)
@@ -284,6 +300,75 @@ def get_date_range(
             start,
             end.replace(hour=23, minute=59, second=59),
         )
+
+    elif preset == "This Quarter":
+        quarter = ((today.month - 1) // 3) + 1
+        start_month = (quarter - 1) * 3 + 1
+
+        start = today.replace(
+            month=start_month,
+            day=1,
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+
+        return (
+            start,
+            today.replace(hour=23, minute=59, second=59),
+        )
+
+    elif preset == "Last Quarter":
+        quarter = ((today.month - 1) // 3) + 1
+
+        if quarter == 1:
+            year = today.year - 1
+            start_month = 10
+        else:
+            year = today.year
+            start_month = (quarter - 2) * 3 + 1
+
+        start = today.replace(
+            year=year,
+            month=start_month,
+            day=1,
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+
+        end = start + relativedelta(months=3) - timedelta(days=1)
+
+        return (
+            start,
+            end.replace(hour=23, minute=59, second=59),
+        )
+
+    elif preset == "Last Year":
+        start = today.replace(
+            year=today.year - 1,
+            month=1,
+            day=1,
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+
+        end = today.replace(
+            year=today.year - 1,
+            month=12,
+            day=31,
+            hour=23,
+            minute=59,
+            second=59,
+            microsecond=0,
+        )
+
+        return start, end
+
 
     return today, today.replace(hour=23, minute=59, second=59)
 

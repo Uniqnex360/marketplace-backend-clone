@@ -129,8 +129,8 @@ def migrate_mongo_order_item_to_clickhouse_task():
     # -----------------------------
     # Date Filtering
     # -----------------------------
-    start_date = "2026-06-01 00:00:00"
-    end_date = "2026-06-13 00:00:00"
+    start_date = "2026-01-01 00:00:00"
+    end_date = "2026-12-01 00:00:00"
 
     print(
         f"[INFO] Querying MongoDB Order collection where order_date between '{start_date}' and '{end_date}'..."
@@ -139,7 +139,8 @@ def migrate_mongo_order_item_to_clickhouse_task():
     order_cursor = (
         Order._get_collection()
         .find(
-            {"migrate_date": {"$exists": True}},
+            {},
+            # {"migrate_date": {"$exists": False}},
             {
                 "_id": 1,
                 "order_items": 1,

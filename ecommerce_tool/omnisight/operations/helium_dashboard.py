@@ -1229,9 +1229,9 @@ def clickhouse_total_revenue(start_date, end_date, filters):
         uniq(order_id) AS orders
 
     FROM fact_order_items
-    WHERE order_date >= toDateTime('{start_date}')
-      AND order_date < toDateTime('{end_date}')
-      AND order_status NOT IN ('Canceled','Cancelled')
+    WHERE order_date_day >= toDate('{start_date.date()}')
+    AND order_date_day <= toDate('{end_date.date()}')
+    AND order_status NOT IN ('Canceled','Cancelled')
     """
 
     marketplace_id = filters.get("marketplace_id")
@@ -1247,6 +1247,9 @@ def clickhouse_total_revenue(start_date, end_date, filters):
 
     if filters.get("manufacturer_name"):
         query += f" AND manufacturer_name IN {tuple(filters['manufacturer_name'])}"
+    
+    if filters.get("country"):
+        query += f" AND country = '{filters['country']}'"
 
     if filters.get("fulfillment_channel"):
         query += f" AND fulfillment_channel = '{filters['fulfillment_channel']}'"
@@ -1281,6 +1284,7 @@ def clickhouse_graph_query(
     manufacturer_name=None,
     fulfillment_channel=None,
     timezone="UTC",
+    country="US",
 ):
 
     time_format = "%Y-%m-%d %H:00:00"
@@ -1330,6 +1334,9 @@ def clickhouse_graph_query(
     if fulfillment_channel:
         query += f" AND fulfillment_channel = '{fulfillment_channel}'"
 
+    if country:
+        query += f" AND country = '{country}'"
+
     query += """
     GROUP BY bucket
     ORDER BY bucket
@@ -1359,198 +1366,6 @@ def clickhouse_graph_query(
 
     return graph
 
-# @csrf_exempt
-# def updatedRevenueWidgetAPIView(request):
-
-#     json_request = JSONParser().parse(request)
-
-#     preset = json_request.get("preset", "Today")
-#     compare_startdate = json_request.get("compare_startdate")
-#     compare_enddate = json_request.get("compare_enddate")
-
-#     marketplace_id = json_request.get("marketplace_id", None)
-#     product_id = json_request.get("product_id", None)
-#     brand_id = json_request.get("brand_id", None)
-#     manufacturer_name = json_request.get("manufacturer_name", None)
-#     fulfillment_channel = json_request.get("fulfillment_channel", None)
-
-#     timezone_str = "US/Pacific"
-
-#     start_date = json_request.get("start_date", None)
-#     end_date = json_request.get("end_date", None)
-
-#     # -----------------------------
-#     # DATE RESOLUTION
-#     # -----------------------------
-#     if start_date:
-#         start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
-#     else:
-#         start_date, end_date = get_date_range(preset, timezone_str)
-
-#     compare_enabled = compare_startdate not in [None, ""]
-
-#     if compare_enabled:
-#         compare_startdate = datetime.strptime(compare_startdate, "%Y-%m-%d")
-#         compare_enddate = datetime.strptime(compare_enddate, "%Y-%m-%d")
-
-#     comapre_past = get_previous_periods(start_date, end_date)
-
-#     # -----------------------------
-#     # CLICKHOUSE PRIMARY CALLS (NO CONCURRENCY)
-#     # -----------------------------
-#     filters = {
-#         "marketplace_id": marketplace_id,
-#         "brand_id": brand_id,
-#         "product_id": product_id,
-#         "manufacturer_name": manufacturer_name,
-#         "fulfillment_channel": fulfillment_channel
-#     }
-
-#     total = clickhouse_total_revenue(start_date, end_date, filters)
-#     graph_data = clickhouse_graph_query(
-#         start_date, end_date, preset,
-#         marketplace_id, brand_id,
-#         product_id, manufacturer_name,
-#         fulfillment_channel, timezone_str
-#     )
-
-#     # -----------------------------
-#     # FALLBACK ONLY IF CLICKHOUSE FAILS
-#     # -----------------------------
-#     if not total:
-#         total = totalRevenueCalculation(
-#             start_date, end_date,
-#             marketplace_id, brand_id,
-#             product_id, manufacturer_name,
-#             fulfillment_channel, timezone_str
-#         )
-
-#     if not graph_data:
-#         graph_data = get_graph_data(
-#             start_date, end_date, preset,
-#             marketplace_id, brand_id,
-#             product_id, manufacturer_name,
-#             fulfillment_channel, timezone_str
-#         )
-
-#     # -----------------------------
-#     # COMPARE LOGIC (NO CONCURRENCY)
-#     # -----------------------------
-#     compare_total = None
-#     compare_graph = None
-
-#     if compare_enabled:
-
-#         compare_total = clickhouse_total_revenue(
-#             compare_startdate, compare_enddate, filters
-#         )
-
-#         compare_graph = clickhouse_graph_query(
-#             compare_startdate, compare_enddate,
-#             preset, marketplace_id,
-#             brand_id, product_id,
-#             manufacturer_name,
-#             fulfillment_channel, timezone_str
-#         )
-
-#         # fallback only if needed
-#         if not compare_total:
-#             compare_total = totalRevenueCalculation(
-#                 compare_startdate, compare_enddate,
-#                 marketplace_id, brand_id,
-#                 product_id, manufacturer_name,
-#                 fulfillment_channel, timezone_str
-#             )
-
-#         if not compare_graph:
-#             compare_graph = get_graph_data(
-#                 compare_startdate, compare_enddate,
-#                 preset, marketplace_id,
-#                 brand_id, product_id,
-#                 manufacturer_name,
-#                 fulfillment_channel, timezone_str
-#             )
-
-#     # -----------------------------
-#     # GRAPH MERGE (UNCHANGED)
-#     # -----------------------------
-#     updated_graph = {}
-
-#     if compare_enabled and compare_graph:
-
-#         for i, (key, metrics) in enumerate(graph_data.items()):
-
-#             compare_metrics = list(compare_graph.values())[i] if i < len(compare_graph) else {}
-
-#             updated_graph[key] = {
-#                 "current_date": key,
-#                 "gross_revenue_with_tax": metrics.get("gross_revenue_with_tax", 0),
-#                 "net_profit": metrics.get("net_profit", 0),
-#                 "profit_margin": metrics.get("profit_margin", 0),
-#                 "orders": metrics.get("orders", 0),
-#                 "units_sold": metrics.get("units_sold", 0),
-#                 "refund_amount": metrics.get("refund_amount", 0),
-#                 "refund_quantity": metrics.get("refund_quantity", 0),
-
-#                 "compare_gross_revenue": compare_metrics.get("gross_revenue_with_tax", 0),
-#                 "compare_net_profit": compare_metrics.get("net_profit", 0),
-#                 "compare_profit_margin": compare_metrics.get("profit_margin", 0),
-#                 "compare_orders": compare_metrics.get("orders", 0),
-#                 "compare_units_sold": compare_metrics.get("units_sold", 0),
-#                 "compare_refund_amount": compare_metrics.get("refund_amount", 0),
-#                 "compare_refund_quantity": compare_metrics.get("refund_quantity", 0),
-#                 "compare_date": list(compare_graph.keys())[i] if i < len(compare_graph) else None,
-#             }
-
-#     else:
-#         updated_graph = graph_data
-
-#     # -----------------------------
-#     # RESPONSE (UNCHANGED)
-#     # -----------------------------
-#     data = {
-#         "total": total,
-#         "graph": updated_graph,
-#         "comapre_past": comapre_past,
-#     }
-
-#     # -----------------------------
-#     # COMPARE % CALC
-#     # -----------------------------
-#     if compare_enabled and compare_total:
-
-#         def pct(a, b):
-#             return round(((a - b) / b * 100), 2) if b else 0
-
-#         data["compare_total"] = {
-#             "gross_revenue": pct(total["gross_revenue_with_tax"], compare_total["gross_revenue_with_tax"]),
-#             "net_profit": pct(total["net_profit"], compare_total["net_profit"]),
-#             "profit_margin": pct(total["profit_margin"], compare_total["profit_margin"]),
-#             "orders": pct(total["orders"], compare_total["orders"]),
-#             "units_sold": pct(total["units_sold"], compare_total["units_sold"]),
-#             "refund_amount": pct(total["refund_amount"], compare_total["refund_amount"]),
-#             "refund_quantity": pct(total["refund_quantity"], compare_total["refund_quantity"]),
-#         }
-
-#     # -----------------------------
-#     # MATRIX FILTER (UNCHANGED)
-#     # -----------------------------
-#     name = "Revenue"
-#     item_result = list(chooseMatrix.objects.aggregate({"$match": {"name": name}}))
-
-#     if item_result:
-#         item_result = item_result[0]
-
-#         if not item_result.get("select_all", False):
-#             for field in [
-#                 "gross_revenue", "units_sold", "refund_quantity",
-#                 "refund_amount", "net_profit", "profit_margin", "orders"
-#             ]:
-#                 if not item_result.get(field, True):
-#                     data["total"].pop(field, None)
-
-#     return data
-
 @csrf_exempt
 def updatedRevenueWidgetAPIView(request):
 
@@ -1564,6 +1379,7 @@ def updatedRevenueWidgetAPIView(request):
     product_id = json_request.get("product_id", None)
     brand_id = json_request.get("brand_id", None)
     manufacturer_name = json_request.get("manufacturer_name", None)
+    country = json_request.get("country", "US")
     fulfillment_channel = json_request.get("fulfillment_channel", None)
 
     # =========================================================
@@ -1603,50 +1419,6 @@ def updatedRevenueWidgetAPIView(request):
     def to_clickhouse_date(d):
         return d.date() if hasattr(d, "date") else d
 
-    def build_where(start_dt, end_dt):
-
-        where_clauses = [
-            "order_date_day BETWEEN {start:Date} AND {end:Date}",
-            "order_status NOT IN ('Canceled','Cancelled')"
-        ]
-
-        params = {
-            "start": to_clickhouse_date(start_dt),
-            "end": to_clickhouse_date(end_dt),
-        }
-
-        if marketplace_id:
-            where_clauses.append("toString(marketplace_id) = {marketplace_id:String}")
-            params["marketplace_id"] = str(marketplace_id)
-
-        if brand_id:
-            where_clauses.append("brand_id IN {brand_id:Array(String)}")
-            params["brand_id"] = (
-                [str(x) for x in brand_id] if isinstance(brand_id, list) else [str(brand_id)]
-            )
-
-        if product_id:
-            where_clauses.append("product_id IN {product_id:Array(String)}")
-            params["product_id"] = (
-                [str(x) for x in product_id] if isinstance(product_id, list) else [str(product_id)]
-            )
-
-        if manufacturer_name:
-            where_clauses.append("manufacturer_name IN {manufacturer_name:Array(String)}")
-            params["manufacturer_name"] = (
-                [str(x) for x in manufacturer_name]
-                if isinstance(manufacturer_name, list)
-                else [str(manufacturer_name)]
-            )
-
-        if fulfillment_channel:
-            where_clauses.append("fulfillment_channel = {fulfillment_channel:String}")
-            params["fulfillment_channel"] = str(fulfillment_channel)
-
-        return " AND ".join(where_clauses), params
-
-    where_sql, params = build_where(start_date, end_date)
-
     # =========================================================
     # CLICKHOUSE PRIMARY CALLS (UNCHANGED)
     # =========================================================
@@ -1656,16 +1428,22 @@ def updatedRevenueWidgetAPIView(request):
         "brand_id": brand_id,
         "product_id": product_id,
         "manufacturer_name": manufacturer_name,
-        "fulfillment_channel": fulfillment_channel
+        "fulfillment_channel": fulfillment_channel,
+        "country": country,
     }
-
     total = clickhouse_total_revenue(start_date, end_date, filters)
 
     graph_data = clickhouse_graph_query(
-        start_date, end_date, preset,
-        marketplace_id, brand_id,
-        product_id, manufacturer_name,
-        fulfillment_channel, timezone_str
+        start_date, 
+        end_date, 
+        preset,
+        marketplace_id, 
+        brand_id,
+        product_id, 
+        manufacturer_name,
+        fulfillment_channel, 
+        timezone_str, 
+        country=country
     )
 
     # fallback (UNCHANGED)
@@ -1820,6 +1598,7 @@ def updatedRevenueWidgetAPIView(request):
 
     return data
  
+
 # @csrf_exempt
 # def get_top_products(request):
 #     json_request = JSONParser().parse(request)
@@ -3003,59 +2782,94 @@ def fetch_sessions_pageviews(from_date, to_date, product_ids):
 
 # -----------------------------
 # CLICKHOUSE (DEBUG ENABLED)
-# -----------------------------
-def fetch_clickhouse_metrics(from_date, to_date, marketplace_id,
-                             brand_id, product_id,
-                             manufacturer_name, fulfillment_channel):
+
+def fetch_clickhouse_metrics(
+    from_date,
+    to_date,
+    marketplace_id,
+    brand_id,
+    product_id,
+    manufacturer_name,
+    fulfillment_channel,
+    country,
+):
 
     start = time.time()
 
-    print("\n[CLICKHOUSE] ===============================")
-    print("[CLICKHOUSE] from_date:", from_date)
-    print("[CLICKHOUSE] to_date:", to_date)
-    print("[CLICKHOUSE] marketplace_id:", marketplace_id)
-    print("[CLICKHOUSE] brand_id:", brand_id)
-    print("[CLICKHOUSE] product_id:", product_id)
-    print("[CLICKHOUSE] manufacturer_name:", manufacturer_name)
-    print("[CLICKHOUSE] fulfillment_channel:", fulfillment_channel)
+    from_date_str = from_date.strftime("%Y-%m-%d")
+    to_date_str = to_date.strftime("%Y-%m-%d")
 
     where = [
-        f"order_date >= toDateTime('{from_date}')",
-        f"order_date <= toDateTime('{to_date}')",
+        f"order_date_day BETWEEN toDate('{from_date_str}') AND toDate('{to_date_str}')",
         "order_status NOT IN ('Canceled','Cancelled')",
     ]
 
     if marketplace_id and marketplace_id != "all":
-        where.append(f"marketplace_id = '{marketplace_id}'")
+
+        if not isinstance(marketplace_id, list):
+            marketplace_id = [marketplace_id]
+
+        where.append(
+            "marketplace_id IN (" +
+            ",".join(f"'{x}'" for x in marketplace_id) +
+            ")"
+        )
 
     if brand_id:
-        where.append("brand_id IN (" + ", ".join("'" + str(x) + "'" for x in brand_id) + ")")
+        where.append(
+            "brand_id IN (" +
+            ", ".join(f"'{x}'" for x in brand_id) +
+            ")"
+        )
 
     if product_id:
-        where.append("product_id IN (" + ", ".join("'" + str(x) + "'" for x in product_id) + ")")
+        where.append(
+            "product_id IN (" +
+            ", ".join(f"'{x}'" for x in product_id) +
+            ")"
+        )
 
     if manufacturer_name:
-        where.append("manufacturer_name IN (" + ", ".join("'" + str(x) + "'" for x in manufacturer_name) + ")")
+        where.append(
+            "manufacturer_name IN (" +
+            ", ".join(f"'{x}'" for x in manufacturer_name) +
+            ")"
+        )
 
     if fulfillment_channel:
-        where.append(f"fulfillment_channel = '{fulfillment_channel}'")
+        where.append(
+            f"fulfillment_channel = '{fulfillment_channel}'"
+        )
+
+    if country:
+        where.append(f"country = '{country}'")
 
     where_clause = " AND ".join(where)
 
     query = f"""
     SELECT
-        sum(gross_revenue),
-        sum(net_item_revenue),
-        sum(quantity),
-        countDistinct(order_id),
+        sum(gross_revenue) AS gross_revenue,
 
-        sum(cogs),
-        sum(referral_fee),
-        sum(vendor_funding),
-        sum(vendor_discount),
-        sum(promotion_discount),
-        sum(ship_promotion_discount),
-        sum(shipping_price)
+        sum(item_price) AS item_price,
+
+        sum(shipping_price) AS shipping_price,
+
+        sum(vendor_funding) AS vendor_funding,
+
+        sum(promotion_discount) AS promotion_discount,
+
+        sum(referral_fee) AS referral_fee,
+
+        sum(product_cost * quantity + merchant_shipment_cost) AS total_cogs,
+
+        sum(vendor_discount) AS vendor_discount,
+
+        sum(ship_promotion_discount) AS ship_promotion_discount,
+
+        sum(quantity) AS units_sold,
+
+        uniq(order_id) AS orders
+
     FROM fact_order_items
     WHERE {where_clause}
     """
@@ -3063,14 +2877,12 @@ def fetch_clickhouse_metrics(from_date, to_date, marketplace_id,
     print("\n[CLICKHOUSE] FINAL QUERY:\n", query)
 
     try:
-        row = client.query(query).result_rows
-        print("[CLICKHOUSE] RAW ROWS:", row)
+        rows = client.query(query).result_rows
 
-        if not row or not row[0]:
-            print("[CLICKHOUSE] EMPTY RESULT → returning zeros")
+        if not rows:
             return {}
 
-        row = row[0]
+        row = rows[0]
 
     except Exception as e:
         print("[CLICKHOUSE] QUERY ERROR:", str(e))
@@ -3078,58 +2890,66 @@ def fetch_clickhouse_metrics(from_date, to_date, marketplace_id,
 
     (
         gross_revenue,
-        net_item_revenue,
+        item_price,
+        shipping_price,
+        vendor_funding,
+        promotion_discount,
+        referral_fee,
+        total_cogs,
+        vendor_discount,
+        ship_promotion_discount,
         units_sold,
         orders,
-        total_cogs,
-        referral_fee,
-        vendor_funding,
-        vendor_discount,
-        promotion_discount,
-        ship_promotion_discount,
-        shipping_cost
     ) = row
 
-    print("[CLICKHOUSE] RAW VALUES:", row)
-
     gross_revenue = gross_revenue or 0
-    net_item_revenue = net_item_revenue or 0
-    total_cogs = total_cogs or 0
+    item_price = item_price or 0
+    shipping_price = shipping_price or 0
+    vendor_funding = vendor_funding or 0
+    promotion_discount = promotion_discount or 0
     referral_fee = referral_fee or 0
+    total_cogs = total_cogs or 0
     vendor_discount = vendor_discount or 0
     ship_promotion_discount = ship_promotion_discount or 0
-    shipping_cost = shipping_cost or 0
-    promotion_discount = promotion_discount or 0
-    vendor_funding = vendor_funding or 0
 
     expenses = total_cogs + referral_fee
 
+    # EXACT SAME LOGIC AS get_metrics_by_date_range_clickhouse
     net_profit = (
-        net_item_revenue
-        + shipping_cost
-        + promotion_discount
+        item_price
+        + shipping_price
         + vendor_funding
-        - (referral_fee + total_cogs + vendor_discount + ship_promotion_discount)
+        + promotion_discount
+        - (
+            referral_fee
+            + total_cogs
+            + vendor_discount
+            + ship_promotion_discount
+        )
     )
 
-    margin = (net_profit / gross_revenue) * 100 if gross_revenue else 0
+    margin = (
+        (net_profit / gross_revenue) * 100
+        if gross_revenue
+        else 0
+    )
 
     result = {
         "grossRevenue": round(gross_revenue, 2),
         "expenses": round(expenses, 2),
         "referral_fee": round(referral_fee, 2),
         "netProfit": round(net_profit, 2),
-        "roi": round((net_profit / expenses) * 100, 2) if expenses else 0,
+        "roi": round((net_profit / expenses) * 100, 2)
+        if expenses else 0,
         "unitsSold": int(units_sold or 0),
         "orders": int(orders or 0),
-        "margin": round(margin, 2)
+        "margin": round(margin, 2),
     }
 
     print("[CLICKHOUSE] FINAL RESULT:", result)
     print(f"[CLICKHOUSE] took {time.time() - start:.4f}s")
 
     return result
-
 
 # -----------------------------
 # MAIN API
@@ -3149,13 +2969,7 @@ def getPeriodWiseData(request):
     product_id = json_request.get('product_id', [])
     manufacturer_name = json_request.get('manufacturer_name', [])
     fulfillment_channel = json_request.get('fulfillment_channel')
-
-    print("[API] Filters:")
-    print(" marketplace_id:", marketplace_id)
-    print(" brand_id:", brand_id)
-    print(" product_id:", product_id)
-    print(" manufacturer_name:", manufacturer_name)
-    print(" fulfillment_channel:", fulfillment_channel)
+    country = json_request.get("country", "US")
 
     timezone_str = 'US/Pacific'
 
@@ -3199,13 +3013,13 @@ def getPeriodWiseData(request):
     ch_cur = fetch_clickhouse_metrics(
         *period_jobs["yesterday"]["current"],
         marketplace_id, brand_id, product_id,
-        manufacturer_name, fulfillment_channel
+        manufacturer_name, fulfillment_channel, country
     )
 
     ch_prev = fetch_clickhouse_metrics(
         *period_jobs["yesterday"]["previous"],
         marketplace_id, brand_id, product_id,
-        manufacturer_name, fulfillment_channel
+        manufacturer_name, fulfillment_channel, country
     )
 
     mongo = fetch_sessions_pageviews(
@@ -3241,13 +3055,13 @@ def getPeriodWiseData(request):
         cur = fetch_clickhouse_metrics(
             cur_start, cur_end,
             marketplace_id, brand_id, product_id,
-            manufacturer_name, fulfillment_channel
+            manufacturer_name, fulfillment_channel, country
         )
 
         prev = fetch_clickhouse_metrics(
             prev_start, prev_end,
             marketplace_id, brand_id, product_id,
-            manufacturer_name, fulfillment_channel
+            manufacturer_name, fulfillment_channel, country
         )
 
         mongo_stats = fetch_sessions_pageviews(cur_start, cur_end, product_id)
@@ -3908,6 +3722,7 @@ def getPeriodWiseDataCustom(request):
     product_id = json_request.get('product_id', [])
     manufacturer_name = json_request.get('manufacturer_name', [])
     fulfillment_channel = json_request.get('fulfillment_channel', None)
+    country = json_request.get('country', "US")
 
     timezone_str = json_request.get("timezone", "Asia/Calcutta")
     preset = json_request.get("preset")
@@ -3982,6 +3797,14 @@ def getPeriodWiseDataCustom(request):
         if manufacturer_name:
             conditions.append("manufacturer_name IN %(manufacturer_name)s")
             params["manufacturer_name"] = tuple(manufacturer_name)
+
+        if country:
+            if isinstance(country, str):
+                conditions.append("country = %(country)s")
+                params["country"] = country
+            else:
+                conditions.append("country IN %(country)s")
+                params["country"] = tuple(country)
 
         if fulfillment_channel:
             conditions.append("fulfillment_channel = %(fc)s")
@@ -6508,6 +6331,7 @@ def getProfitAndLossDetails(request):
     product_id = json_request.get('product_id', [])
     manufacturer_name = json_request.get('manufacturer_name', [])
     fulfillment_channel = json_request.get('fulfillment_channel')
+    country = json_request.get("country", "US")
     preset = json_request.get('preset')
 
     start_date = json_request.get("start_date")
@@ -6557,6 +6381,10 @@ def getProfitAndLossDetails(request):
         if fulfillment_channel:
             filters.append("fulfillment_channel = {channel:String}")
             params["channel"] = fulfillment_channel
+
+        if country:
+            filters.append("country = {country:String}")
+            params["country"] = country
 
         if brand_id:
             filters.append("brand_id IN {brand:Array(String)}")

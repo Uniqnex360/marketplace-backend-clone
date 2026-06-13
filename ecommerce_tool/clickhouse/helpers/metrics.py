@@ -231,9 +231,48 @@ def get_metrics_by_date_range_clickhouse(request):
     # -------------------------
     # METRICS QUERY (UPDATED)
     # -------------------------
+    # metrics_query = f"""
+    #     SELECT
+    #         sum(gross_revenue) AS gross_revenue_with_tax,
+
+    #         sum(product_cost * quantity + merchant_shipment_cost) AS cogs,
+    #         sum(referral_fee) AS channel_fees,
+
+    #         sum(quantity) AS total_units,
+    #         sum(item_tax) AS total_tax,
+
+    #         sum(item_price) AS total_item_price,
+    #         sum(promotion_discount) AS promotion_discount,
+    #         sum(ship_promotion_discount) AS ship_promotion_discount,
+
+    #         uniq(order_id) AS total_orders,
+
+    #         sum(merchant_shipment_cost) AS shipping_cost,
+    #         sum(shipping_price) AS shipping_price,
+    #         sum(vendor_funding) AS vendor_funding,
+    #         sum(vendor_discount) AS vendor_discount
+
+    #     FROM fact_order_items
+    #     WHERE {where_sql}
+    # """
+
     metrics_query = f"""
         SELECT
             sum(gross_revenue) AS gross_revenue_with_tax,
+
+            (
+                sum(item_price)
+                + sum(shipping_price)
+                + sum(vendor_funding)
+                + sum(promotion_discount)
+
+                - (
+                    sum(referral_fee)
+                    + sum(product_cost * quantity + merchant_shipment_cost)
+                    + sum(vendor_discount)
+                    + sum(ship_promotion_discount)
+                )
+            ) AS net_profit,
 
             sum(product_cost * quantity + merchant_shipment_cost) AS cogs,
             sum(referral_fee) AS channel_fees,
@@ -241,16 +280,7 @@ def get_metrics_by_date_range_clickhouse(request):
             sum(quantity) AS total_units,
             sum(item_tax) AS total_tax,
 
-            sum(item_price) AS total_item_price,
-            sum(promotion_discount) AS promotion_discount,
-            sum(ship_promotion_discount) AS ship_promotion_discount,
-
-            uniq(order_id) AS total_orders,
-
-            sum(merchant_shipment_cost) AS shipping_cost,
-            sum(shipping_price) AS shipping_price,
-            sum(vendor_funding) AS vendor_funding,
-            sum(vendor_discount) AS vendor_discount
+            uniq(order_id) AS total_orders
 
         FROM fact_order_items
         WHERE {where_sql}
@@ -280,38 +310,66 @@ def get_metrics_by_date_range_clickhouse(request):
     # -------------------------
     # METRICS BUILDER (UPDATED LOGIC)
     # -------------------------
+    # def build_metrics(row):
+
+    #     gross = row[0] or 0
+
+    #     cogs = row[1] or 0
+    #     channel_fees = row[2] or 0
+
+    #     units = row[3] or 0
+    #     tax = row[4] or 0
+
+    #     item_price = row[5] or 0
+    #     promo_discount = row[6] or 0
+    #     ship_promo_discount = row[7] or 0
+
+    #     orders = row[8] or 0
+
+    #     shipping_cost = row[9] or 0
+    #     shipping_price = row[10] or 0
+    #     vendor_funding = row[11] or 0
+    #     vendor_discount = row[12] or 0
+
+    #     # -------------------------
+    #     # CORE FINANCE LOGIC (FIXED)
+    #     # -------------------------
+
+    #     expense = cogs + channel_fees
+
+    #     revenue_side = item_price + shipping_price + vendor_funding + promo_discount
+
+    #     cost_side = channel_fees + cogs + vendor_discount + ship_promo_discount
+
+    #     net_profit = revenue_side - cost_side
+
+    #     return {
+    #         "gross_revenue_with_tax": gross,
+    #         "total_cogs": cogs,
+    #         "referral_fee": channel_fees,
+    #         "total_units": units,
+    #         "total_tax": tax,
+    #         "product_cost": item_price,
+    #         "total_orders": orders,
+    #         "total_expense": expense,
+    #         "net_profit": net_profit,
+    #         "margin": round((net_profit / gross) * 100, 2) if gross else 0,
+    #     }
+
     def build_metrics(row):
 
         gross = row[0] or 0
+        net_profit = row[1] or 0
 
-        cogs = row[1] or 0
-        channel_fees = row[2] or 0
+        cogs = row[2] or 0
+        channel_fees = row[3] or 0
 
-        units = row[3] or 0
-        tax = row[4] or 0
+        units = row[4] or 0
+        tax = row[5] or 0
 
-        item_price = row[5] or 0
-        promo_discount = row[6] or 0
-        ship_promo_discount = row[7] or 0
-
-        orders = row[8] or 0
-
-        shipping_cost = row[9] or 0
-        shipping_price = row[10] or 0
-        vendor_funding = row[11] or 0
-        vendor_discount = row[12] or 0
-
-        # -------------------------
-        # CORE FINANCE LOGIC (FIXED)
-        # -------------------------
+        orders = row[6] or 0
 
         expense = cogs + channel_fees
-
-        revenue_side = item_price + shipping_price + vendor_funding + promo_discount
-
-        cost_side = channel_fees + cogs + vendor_discount + ship_promo_discount
-
-        net_profit = revenue_side - cost_side
 
         return {
             "gross_revenue_with_tax": gross,
@@ -319,7 +377,7 @@ def get_metrics_by_date_range_clickhouse(request):
             "referral_fee": channel_fees,
             "total_units": units,
             "total_tax": tax,
-            "product_cost": item_price,
+            "product_cost": 0,  # keeping response structure unchanged
             "total_orders": orders,
             "total_expense": expense,
             "net_profit": net_profit,
@@ -346,3 +404,4 @@ def get_metrics_by_date_range_clickhouse(request):
     }
 
     return metrics
+

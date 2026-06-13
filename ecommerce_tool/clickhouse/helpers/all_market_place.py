@@ -256,6 +256,7 @@ def all_market_place_data_clickhouse(request):
     manufacturer_name = json_request.get("manufacturer_name", [])
     fulfillment_channel = json_request.get("fulfillment_channel", None)
     preset = json_request.get("preset")
+    country = json_request.get("country")
 
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
@@ -305,6 +306,12 @@ def all_market_place_data_clickhouse(request):
         if fulfillment_channel:
             filters.append("fulfillment_channel = {channel:String}")
             params["channel"] = fulfillment_channel
+
+        if country:
+            filters.append("country = {country:String}")
+            params["country"] = country
+
+
 
         return " AND ".join(filters), params
 
@@ -459,3 +466,4 @@ def all_market_place_data_clickhouse(request):
     }
 
     return response_data
+
