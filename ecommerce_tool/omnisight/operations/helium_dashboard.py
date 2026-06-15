@@ -1991,8 +1991,8 @@ def getPreviousDateRange(start_date, end_date):
     previous_end_date = start_date - timedelta(days=1)
     return previous_start_date.strftime("%Y-%m-%d"), previous_end_date.strftime("%Y-%m-%d")
 
-@csrf_exempt
 # @redis_cache(timeout=900,key_prefix='get_products_with_pagination')
+@csrf_exempt
 def get_products_with_pagination(request):
     # return main(request)
     json_request = JSONParser().parse(request)
@@ -2497,6 +2497,7 @@ def get_individual_products(match, page, page_size, start_date, end_date,
         "tab_type": "sku"
     }
     return JsonResponse(response_data, safe=False)
+
 
 def batch_get_sales_data_optimized(product_ids, start_date, end_date, today_start_date, today_end_date):
     if not product_ids:

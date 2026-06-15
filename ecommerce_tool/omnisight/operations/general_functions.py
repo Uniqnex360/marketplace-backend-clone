@@ -1786,6 +1786,18 @@ def salesAnalytics(request):
         # ---------------------------------
         # DATE RANGE
         # ---------------------------------
+        # if start_date and start_date != "":
+        #     if isinstance(start_date, datetime):
+        #         start_date = start_date.isoformat()
+
+        #     if isinstance(end_date, datetime):
+        #         end_date = end_date.isoformat()
+
+        #     start_date, end_date = convertdateTotimezone(
+        #         start_date,
+        #         end_date,
+        #         timezone_str,
+        #     )
         if start_date and start_date != "":
             if isinstance(start_date, datetime):
                 start_date = start_date.isoformat()
@@ -1793,10 +1805,16 @@ def salesAnalytics(request):
             if isinstance(end_date, datetime):
                 end_date = end_date.isoformat()
 
-            start_date, end_date = convertdateTotimezone(
-                start_date,
-                end_date,
-                timezone_str,
+            start_date = pytz.UTC.localize(
+                datetime.strptime(start_date, "%Y-%m-%d")
+            )
+
+            end_date = pytz.UTC.localize(
+                datetime.strptime(end_date, "%Y-%m-%d").replace(
+                    hour=23,
+                    minute=59,
+                    second=59
+                )
             )
         else:
             start_date, end_date = get_date_range(
