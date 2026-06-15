@@ -4002,11 +4002,23 @@ def getPeriodWiseDataCustom(request):
         current.update(fetch_sessions(cur_from, cur_to))
         previous.update(fetch_sessions(prev_from, prev_to))
 
-        current["netProfit"] = compute_net(current)["netProfit"]
-        previous["netProfit"] = compute_net(previous)["netProfit"]
+        current_net = compute_net(current)
+        previous_net = compute_net(previous)
 
-        current["margin"] = (current["netProfit"] / current["grossRevenue"] * 100) if current["grossRevenue"] else 0
-        previous["margin"] = (previous["netProfit"] / previous["grossRevenue"] * 100) if previous["grossRevenue"] else 0
+        current["netProfit"] = current_net["netProfit"]
+        previous["netProfit"] = previous_net["netProfit"]
+
+        # ADD THESE TWO LINES
+        current["expenses"] = current_net["totalCosts"]
+        previous["expenses"] = previous_net["totalCosts"]
+
+        current["margin"] = (
+            current["netProfit"] / current["grossRevenue"] * 100
+        ) if current["grossRevenue"] else 0
+
+        previous["margin"] = (
+            previous["netProfit"] / previous["grossRevenue"] * 100
+        ) if previous["grossRevenue"] else 0
 
         return {
             "dateRanges": {

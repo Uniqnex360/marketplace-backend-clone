@@ -1775,7 +1775,8 @@ def salesAnalytics(request):
         marketplace_id = json_request.get("marketplace_id", "all")
         start_date = json_request.get("start_date")
         end_date = json_request.get("end_date")
-        timezone_str = json_request.get("timezone", "US/Pacific")
+        # timezone_str = json_request.get("timezone", "US/Pacific")
+        timezone_str = "Asia/Calcutta"
         brand_id_list = json_request.get("brand_id")
         sku_list = json_request.get("sku", [])
         manufacturer_name = json_request.get("manufacturer_name", [])
