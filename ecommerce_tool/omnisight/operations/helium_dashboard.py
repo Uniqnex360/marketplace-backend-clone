@@ -4506,7 +4506,8 @@ def allMarketplaceData(request):
             "tax_price": round(tax_price, 2),
             "total_cogs": round(total_cogs, 2),
             "product_cost": round(temp_price, 2),
-            "shipping_cost": round(shipping_cost, 2)
+            "shipping_cost": round(shipping_cost, 2),
+            "revenue": 0,
         }
 
     # -------------------------

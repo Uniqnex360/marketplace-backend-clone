@@ -1782,6 +1782,7 @@ def salesAnalytics(request):
         manufacturer_name = json_request.get("manufacturer_name", [])
         fulfillment_channel = json_request.get("fulfillment_channel")
         preset = json_request.get("preset", "Today")
+        country =json_request.get("country", "US")
 
         # ---------------------------------
         # DATE RANGE
@@ -1863,6 +1864,12 @@ def salesAnalytics(request):
             )
             params["sku_list"] = tuple(sku_list)
 
+        if country:
+            where_conditions.append(
+                "country = %(country)s"
+            )
+            params["country"] = country
+
         # ---------------------------------
         # MONGO FALLBACK
         # Only if field not present in CH
@@ -1897,8 +1904,8 @@ def salesAnalytics(request):
         SELECT
             order_date_day,
             countDistinct(order_id) AS order_count,
-            sum(order_total) AS order_value,
-            sum(item_price) AS total_sales
+            sum(gross_revenue) AS order_value,
+            sum(gross_revenue) AS total_sales
         FROM fact_order_items
         WHERE {' AND '.join(where_conditions)}
         GROUP BY order_date_day

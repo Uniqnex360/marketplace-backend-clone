@@ -446,6 +446,7 @@ def all_market_place_data_clickhouse(request):
                         "roi": (
                             round((net_profit / expenses) * 100, 2) if expenses else 0
                         ),
+                        "refunds": 0,
                     }
                 ],
             }
