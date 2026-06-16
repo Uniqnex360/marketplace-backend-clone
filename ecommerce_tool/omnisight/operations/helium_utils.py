@@ -740,6 +740,8 @@ def AnnualizedRevenueAPIView(target_date):
     annualized_revenue = average_monthly * 12
     annualized_revenue = round(annualized_revenue, 2)
     return annualized_revenue
+
+
 def getdaywiseproductssold(start_date, end_date, product_id, is_hourly=False):
     date_format = "%Y-%m-%d %H:00" if is_hourly else "%Y-%m-%d"
     pipeline = [
@@ -791,6 +793,8 @@ def getdaywiseproductssold(start_date, end_date, product_id, is_hourly=False):
     ]
     orders = list(Order.objects.aggregate(*pipeline))
     return orders
+
+
 def pageViewsandSessionCount(start_date,end_date,product_id):
     pipeline = [
         {

@@ -1991,10 +1991,12 @@ def getPreviousDateRange(start_date, end_date):
     previous_end_date = start_date - timedelta(days=1)
     return previous_start_date.strftime("%Y-%m-%d"), previous_end_date.strftime("%Y-%m-%d")
 
+import time
 # @redis_cache(timeout=900,key_prefix='get_products_with_pagination')
 @csrf_exempt
 def get_products_with_pagination(request):
-    # return main(request)
+
+    start_time = time.time()
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
     brand_id = json_request.get('brand_id', None)
@@ -2012,11 +2014,13 @@ def get_products_with_pagination(request):
     sku_search = json_request.get('sku_search')
     search_query = json_request.get('search_query')
     timezone_str = 'US/Pacific'
+
     if start_date and start_date != "":
         start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
     else:
         start_date, end_date = get_date_range(preset, timezone_str)
     today_start_date, today_end_date = get_date_range("Today", timezone_str)
+
     if timezone_str != 'UTC':
         today_start_date, today_end_date = convertLocalTimeToUTC(today_start_date, today_end_date, timezone_str)
         start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
@@ -2042,18 +2046,51 @@ def get_products_with_pagination(request):
             {'product_id':{"$regex":search_query,"$options":'i'}}
         ]
     if parent:
-        return get_parent_products(match, page, page_size, start_date, end_date, 
-                                              today_start_date, today_end_date, sort_by, sort_by_value)
+        return get_parent_products(
+            match, 
+            page, 
+            page_size, 
+            start_date, 
+            end_date, 
+            today_start_date, 
+            today_end_date, 
+            sort_by, 
+            sort_by_value
+        )
     else:
-        return get_individual_products(match, page, page_size, start_date, end_date, 
-                                                  today_start_date, today_end_date, sort_by, sort_by_value)
-        
-def get_parent_products(match, page, page_size, start_date, end_date, 
-                                   today_start_date, today_end_date, sort_by, sort_by_value):
+        return get_individual_products(
+            match, 
+            page, 
+            page_size, 
+            start_date, 
+            end_date, 
+            today_start_date, 
+            today_end_date, 
+            sort_by, 
+            sort_by_value
+        )
+    
+def get_parent_products(
+    match,
+    page,
+    page_size,
+    start_date,
+    end_date,
+    today_start_date,
+    today_end_date,
+    sort_by,
+    sort_by_value
+):
+
+    sort_fields = ["price_start", "price_end", "stock", "sku_count"]
+
     pipeline = []
+
     if match:
         pipeline.append({"$match": match})
+
     pipeline.extend([
+
         {
             "$lookup": {
                 "from": "orderitems",
@@ -2062,228 +2099,608 @@ def get_parent_products(match, page, page_size, start_date, end_date,
                     {
                         "$match": {
                             "$expr": {
-                                "$eq": ["$product_id", "$$product_id"]
+                                "$eq": [
+                                    "$product_id",
+                                    "$$product_id"
+                                ]
                             }
                         }
                     },
                     {
                         "$group": {
-                            "_id": "$product_id",
-                            "total_quantity_ordered": {"$sum": "$QuantityOrdered"}
+                            "_id": None,
+                            "qty": {
+                                "$sum":"$QuantityOrdered"
+                            }
                         }
                     }
                 ],
-                "as": "order_quantities"
+                "as":"orders"
             }
         },
+
         {
             "$addFields": {
+
                 "total_quantity_ordered": {
-                    "$ifNull": [
-                        {"$arrayElemAt": ["$order_quantities.total_quantity_ordered", 0]},
-                        {"$ifNull": ["$quantity", 0]}
+                    "$ifNull":[
+                        {
+                            "$arrayElemAt":[
+                                "$orders.qty",
+                                0
+                            ]
+                        },
+                        {"$ifNull":["$quantity",0]}
                     ]
                 },
+
                 "marketplace_id": {
-                    "$cond": {
-                        "if": {"$ne": ["$marketplace_id", None]},
-                        "then": "$marketplace_id",
-                        "else": {
-                            "$cond": {
-                                "if": {"$gt": [{"$size": {"$ifNull": ["$marketplace_ids", []]}}, 0]},
-                                "then": {"$arrayElemAt": ["$marketplace_ids", 0]},
-                                "else": None
-                            }
+                    "$ifNull":[
+                        "$marketplace_id",
+                        {
+                            "$arrayElemAt":[
+                                "$marketplace_ids",
+                                0
+                            ]
                         }
+                    ]
+                }
+            }
+        },
+
+        {
+            "$lookup":{
+                "from":"marketplace",
+                "localField":"marketplace_id",
+                "foreignField":"_id",
+                "as":"marketplace_info"
+            }
+        },
+
+        {
+            "$unwind":{
+                "path":"$marketplace_info",
+                "preserveNullAndEmptyArrays":True
+            }
+        },
+
+        {
+            "$group":{
+
+                "_id":"$parent_sku",
+
+                "first_product":{
+                    "$first":"$$ROOT"
+                },
+
+                "stock":{
+                    "$sum":{
+                        "$ifNull":[
+                            "$quantity",
+                            0
+                        ]
+                    }
+                },
+
+                "quantity_ordered":{
+                    "$sum":"$total_quantity_ordered"
+                },
+
+                "price_start":{
+                    "$min":{
+                        "$ifNull":[
+                            "$price",
+                            0
+                        ]
+                    }
+                },
+
+                "price_end":{
+                    "$max":{
+                        "$ifNull":[
+                            "$price",
+                            0
+                        ]
+                    }
+                },
+
+                "sku_count":{
+                    "$sum":1
+                },
+
+                "product_ids":{
+                    "$push":{
+                        "$toString":"$_id"
+                    }
+                },
+
+                "vendor_funding":{
+                    "$sum":{
+                        "$ifNull":[
+                            "$vendor_funding",
+                            0
+                        ]
+                    }
+                },
+
+                "total_product_cost":{
+                    "$avg":{
+                        "$ifNull":[
+                            "$product_cost",
+                            0
+                        ]
+                    }
+                },
+
+                "total_merchant_shipment_cost":{
+                    "$avg":{
+                        "$ifNull":[
+                            "$merchant_shipment_cost",
+                            0
+                        ]
+                    }
+                },
+
+                "total_referral_fee":{
+                    "$avg":{
+                        "$ifNull":[
+                            "$referral_fee",
+                            0
+                        ]
                     }
                 }
             }
         },
+
         {
-            "$lookup": {
-                "from": "marketplace",
-                "localField": "marketplace_id",
-                "foreignField": "_id",
-                "as": "marketplace_info"
-            }
-        },
-        {"$unwind": {"path": "$marketplace_info", "preserveNullAndEmptyArrays": True}},
-        # {
-        #     "$addFields": {
-        #         "calculated_cogs": {
-        #             "$add": [
-        #                 {"$multiply": [
-        #                     {"$ifNull": ["$product_cost", 0]},
-        #                     {"$ifNull": ["$total_quantity_ordered", 0]}
-        #                 ]},
-        #                 {"$ifNull": ["$merchant_shipment_cost", 0]}
-        #             ]
-        #         },
-        #         "calculated_fees": {
-        #             "$cond": {
-        #                 "if": {"$eq": ["$marketplace_info.name", "Amazon"]},
-        #                 "then": {
-        #                     "$add": [
-        #                         {"$ifNull": ["$referral_fee", 0]},
-        #                     ]
-        #                 },
-        #                 "else": {
-        #                     "$add": [
-        #                         {"$ifNull": ["$walmart_fee", 0]},
-        #                         {"$ifNull": ["$w_shiping_cost", 0]}
-        #                     ]
-        #                 }
-        #             }
-        #         }
-        #     }
-        # },
-        {
-            "$group": {
-                "_id": "$parent_sku",
-                "first_product": {"$first": "$$ROOT"},
-                "total_stock": {"$sum": {"$ifNull": ["$quantity", 0]}},
-                "total_quantity_ordered": {"$sum": "$total_quantity_ordered"},
-                "min_price": {"$min": {"$ifNull": ["$price", 0]}},
-                "max_price": {"$max": {"$ifNull": ["$price", 0]}},
-                "sku_count": {"$sum": 1},
-                # "total_cogs": {"$sum": "$calculated_cogs"},
-                # "total_channel_fees": {"$sum": "$calculated_fees"},
-                "total_product_cost":{"$sum":{"$ifNull":['$product_cost',0]}},
-                "total_merchant_shipment_cost":{"$sum":{"$ifNull":['$merchant_shipment_cost',0]}},
-                'product_costs':{"$push":{"$ifNull":["$product_cost",0]}},
-                'merchant_shipment_costs':{"$push":{"$ifNull":["$merchant_shipment_cost",0]}},
-                "product_ids": {"$push": {"$toString": "$_id"}},
-                "vendor_funding_sum": {"$sum": {"$ifNull": ["$vendor_funding", 0]}},
-                "total_referral_fee":{"$sum":{"$ifNull":["$referral_fee",0]}},
-                "referral_fees":{"$push":{"$ifNull":['$referral_fee',0]}}
-            }
-        },
-        {
-            "$project": {
-                "_id": 0,
-                "parent_sku": "$_id",
-                "id": {"$toString": "$first_product._id"},
-                "title": {"$ifNull": ["$first_product.product_title", ""]},
-                "imageUrl": {"$ifNull": ["$first_product.image_url", ""]},
-                "marketplace": {"$ifNull": ["$first_product.marketplace_info.name", ""]},
-                "category": {"$ifNull": ["$first_product.category", ""]},
-                "product_id": {"$ifNull": ["$first_product.product_id", ""]},
-                "sku_count": 1,
-                "stock": "$total_stock",
-                "quantity_ordered": "$total_quantity_ordered",
-                "price_start": "$min_price",
-                "price_end": "$max_price",
-                # "cogs": {"$round": ["$total_cogs", 2]},
-                # "totalchannelFees": {"$round": ["$total_channel_fees", 2]},
-                'total_product_cost':1,
+            "$project":{
+
+                "_id":0,
+
+                "parent_sku":"$_id",
+
+                "id":{
+                    "$toString":"$first_product._id"
+                },
+
+                "title":{
+                    "$ifNull":[
+                        "$first_product.product_title",
+                        ""
+                    ]
+                },
+
+                "imageUrl":{
+                    "$ifNull":[
+                        "$first_product.image_url",
+                        ""
+                    ]
+                },
+
+                "marketplace":{
+                    "$ifNull":[
+                        "$first_product.marketplace_info.name",
+                        ""
+                    ]
+                },
+
+                "category":{
+                    "$ifNull":[
+                        "$first_product.category",
+                        ""
+                    ]
+                },
+
+                "product_id":{
+                    "$ifNull":[
+                        "$first_product.product_id",
+                        ""
+                    ]
+                },
+
+                "sku_count":1,
+                "stock":1,
+                "quantity_ordered":1,
+                "price_start":1,
+                "price_end":1,
+                "product_ids":1,
+                "vendor_funding":1,
+                "total_product_cost":1,
                 "total_merchant_shipment_cost":1,
-                "product_costs":1,
-                "merchant_shipment_costs":1,
-                "product_ids": 1,
-                "vendor_funding": "$vendor_funding_sum",
-                "total_referral_fee":1,
-                "referral_fees":1
+                "total_referral_fee":1
             }
         }
     ])
-    count_pipeline = pipeline + [{"$count": "total"}]
-    total_result = list(Product.objects.aggregate(*count_pipeline))
-    total_products=total_result[0]['total'] if total_result else 0
-    max_page=max(1,math.ceil(total_products/page_size))
-    page=min(page,max_page)
-    if sort_by and sort_by in ["price_start", "price_end", "stock", "sku_count"]:
-        pipeline.append({"$sort": {sort_by: int(sort_by_value)}})
-    pipeline.extend([
-        {"$skip": (page - 1) * page_size},
-        {"$limit": page_size}
-    ])
-    products_result = list(Product.objects.aggregate(*pipeline))
-    all_product_ids = []
-    for group in products_result:
-        all_product_ids.extend(group["product_ids"])
-    sales_data = batch_get_sales_data_optimized(all_product_ids, start_date, end_date, today_start_date, today_end_date)
-    processed_products = []
-    for group in products_result:
-        total_sales_today = 0
-        total_units_today = 0
-        total_revenue = 0
-        total_net_profit = 0
-        total_units_period = 0
-        total_referral_fees_period=0
-        total_revenue_period = 0
-        total_net_profit_period = 0
-        total_cogs_period=0
-        avg_product_cost = group["total_product_cost"] / len(group["product_ids"]) if group["product_ids"] else 0
-        avg_merchant_shipment_cost = group["total_merchant_shipment_cost"] / len(group["product_ids"]) if group["product_ids"] else 0
-        avg_referral_fee=group['total_referral_fee']/len(group['product_ids']) if group['product_ids'] else 0
-        for i,product_id in enumerate (group["product_ids"]):
-            product_sales = sales_data.get(product_id, {
-                "today": {"revenue": 0, "units": 0},
-                "period": {"revenue": 0, "units": 0},
-                "compare": {"revenue": 0, "units": 0}
-            })
-            product_cost=(group['product_costs'][i] if i <len(group['product_costs'])else avg_product_cost)
-            merchant_ship_cost=(group['merchant_shipment_costs'][i] if i <len(group['merchant_shipment_costs'])else avg_merchant_shipment_cost)
-            units_sold_in_period=product_sales['period']['units']
-            product_cogs=(product_cost*units_sold_in_period)+merchant_ship_cost
-            total_cogs_period+=product_cogs
-            # cogs = group["cogs"] / len(group["product_ids"])  
-            vendor_funding = group["vendor_funding"] / len(group["product_ids"])  
-            total_sales_today += product_sales["today"]["revenue"]
-            total_units_today += product_sales["period"]["units"]
-            total_revenue += product_sales["period"]["revenue"]
-            period_profit = (product_sales["period"]["revenue"] - product_cogs + 
-                   (vendor_funding * units_sold_in_period))
-            total_net_profit += period_profit
-            total_units_period += product_sales["compare"]["units"] - product_sales["period"]["units"]
-            total_revenue_period += product_sales["compare"]["revenue"] - product_sales["period"]["revenue"]
-            units_sold_compare=product_sales['compare']['units']
-            referral_fee=(group['referral_fees'][i] if i <len(group['referral_fees']) else avg_referral_fee)
-            compare_cogs=(product_cost*units_sold_compare)+merchant_ship_cost
-            total_referral_fees_period+=referral_fee
-            compare_profit = (product_sales["compare"]["revenue"] - compare_cogs + 
-                            (vendor_funding * units_sold_compare))
-            total_net_profit_period += compare_profit - period_profit
-        margin = (total_net_profit / total_revenue) * 100 if total_revenue > 0 else 0
-        margin_period = ((total_net_profit_period / (total_revenue + total_revenue_period)) * 100 if (total_revenue + total_revenue_period) > 0 else 0) - margin
-        group.update({
-            "salesForToday": round(total_sales_today, 2),
-            "unitsSoldForToday": total_units_today,
-            "unitsSoldForPeriod": total_units_period,
-            "refunds": 0,
-            "refundsforPeriod": 0,
-            "refundsAmount": 0,
-            "refundsAmountforPeriod": 0,
-            "grossRevenue": round(total_revenue, 2),
-            "grossRevenueforPeriod": round(total_revenue_period, 2),
-            "netProfit": round(total_net_profit, 2),
-            "netProfitforPeriod": round(total_net_profit_period, 2),
-            "margin": round(margin, 2),
-            "marginforPeriod": round(margin_period, 2),
-            "cogs":round(total_cogs_period,2),
-            'totalchannelFees':round(total_referral_fees_period,2)
+
+    if sort_by in sort_fields:
+        pipeline.append({
+            "$sort":{
+                sort_by:int(sort_by_value)
+            }
         })
-        group.pop("product_ids", None)
-        group.pop("vendor_funding", None)
-        group.pop("total_product_cost", None)
-        group.pop("total_merchant_shipment_cost", None)
-        group.pop("product_costs", None)
-        group.pop("merchant_shipment_costs", None)
+
+    pipeline.append({
+
+        "$facet":{
+
+            "metadata":[
+                {
+                    "$count":"total"
+                }
+            ],
+
+            "products":[
+                {
+                    "$skip":(
+                        page-1
+                    )*page_size
+                },
+                {
+                    "$limit":page_size
+                }
+            ]
+        }
+    })
+
+    import time
+    start_time = time.time()
+    result=list(Product.objects.aggregate(*pipeline))[0]
+    print("query time", time.time() - start_time)
+
+    total_products=(
+        result["metadata"][0]["total"]
+        if result["metadata"]
+        else 0
+    )
+
+    max_page=max(
+        1,
+        math.ceil(
+            total_products/page_size
+        )
+    )
+
+    page=min(
+        page,
+        max_page
+    )
+
+    products_result=result["products"]
+
+    all_product_ids=[]
+
+    for p in products_result:
+        all_product_ids.extend(
+            p["product_ids"]
+        )
+
+    sales_time = time.time()
+    sales_data=batch_get_sales_data_optimized(
+        all_product_ids,
+        start_date,
+        end_date,
+        today_start_date,
+        today_end_date
+    )
+    print("sales time", time.time() - sales_time)
+
+    processed=[]
+    loop_time = time.time()
+    for group in products_result:
+
+        revenue=0
+        net_profit=0
+        today_sales=0
+        today_units=0
+        units_period=0
+        revenue_period=0
+        net_profit_period=0
+        cogs=0
+
+        avg_cost=group["total_product_cost"]
+        avg_ship=group["total_merchant_shipment_cost"]
+        avg_referral=group["total_referral_fee"]
+
+        vendor=(
+            group["vendor_funding"]/
+            max(
+                len(group["product_ids"]),
+                1
+            )
+        )
+
+        for pid in group["product_ids"]:
+
+            s=sales_data.get(
+                pid,
+                {
+                    "today":{"revenue":0,"units":0},
+                    "period":{"revenue":0,"units":0},
+                    "compare":{"revenue":0,"units":0}
+                }
+            )
+
+            units=s["period"]["units"]
+
+            product_cogs=(
+                avg_cost*units
+            )+avg_ship
+
+            cogs+=product_cogs
+
+            today_sales+=s["today"]["revenue"]
+
+            today_units+=s["today"]["units"]
+
+            revenue+=s["period"]["revenue"]
+
+            profit=(
+                s["period"]["revenue"]
+                - product_cogs
+                + (vendor*units)
+            )
+
+            net_profit+=profit
+
+        margin=(
+            net_profit/revenue*100
+            if revenue>0
+            else 0
+        )
+
+        group.update({
+
+            "salesForToday":round(today_sales,2),
+            "unitsSoldForToday":today_units,
+            "unitsSoldForPeriod":units_period,
+            "refunds":0,
+            "refundsforPeriod":0,
+            "refundsAmount":0,
+            "refundsAmountforPeriod":0,
+            "grossRevenue":round(revenue,2),
+            "grossRevenueforPeriod":round(revenue_period,2),
+            "netProfit":round(net_profit,2),
+            "netProfitforPeriod":round(net_profit_period,2),
+            "margin":round(margin,2),
+            "marginforPeriod":0,
+            "cogs":round(cogs,2),
+            "totalchannelFees":round(avg_referral,2)
+
+        })
+
+        group.pop("product_ids",None)
+        group.pop("vendor_funding",None)
+        group.pop("total_product_cost",None)
+        group.pop("total_merchant_shipment_cost",None)
+
+        processed.append(group)
+
+    print("loop time", time.time() - loop_time)
+    return JsonResponse({
+
+        "total_products":total_products,
+        "page":page,
+        "page_size":page_size,
+        "products":clean_json_floats(processed),
+        "tab_type":"parent"
+
+    },safe=False)   
+
+# def get_parent_products(
+#         match, 
+#         page, 
+#         page_size, 
+#         start_date, 
+#         end_date, 
+#         today_start_date, 
+#         today_end_date, 
+#         sort_by, 
+#         sort_by_value
+#     ):
+
+#     pipeline = []
+#     if match:
+#         pipeline.append({"$match": match})
+
+#     pipeline.extend([
+#         {
+#             "$lookup": {
+#                 "from": "orderitems",
+#                 "let": {"product_id": {"$toString": "$_id"}},
+#                 "pipeline": [
+#                     {
+#                         "$match": {
+#                             "$expr": {
+#                                 "$eq": ["$product_id", "$$product_id"]
+#                             }
+#                         }
+#                     },
+#                     {
+#                         "$group": {
+#                             "_id": "$product_id",
+#                             "total_quantity_ordered": {"$sum": "$QuantityOrdered"}
+#                         }
+#                     }
+#                 ],
+#                 "as": "order_quantities"
+#             }
+#         },
+#         {
+#             "$addFields": {
+#                 "total_quantity_ordered": {
+#                     "$ifNull": [
+#                         {"$arrayElemAt": ["$order_quantities.total_quantity_ordered", 0]},
+#                         {"$ifNull": ["$quantity", 0]}
+#                     ]
+#                 },
+#                 "marketplace_id": {
+#                     "$cond": {
+#                         "if": {"$ne": ["$marketplace_id", None]},
+#                         "then": "$marketplace_id",
+#                         "else": {
+#                             "$cond": {
+#                                 "if": {"$gt": [{"$size": {"$ifNull": ["$marketplace_ids", []]}}, 0]},
+#                                 "then": {"$arrayElemAt": ["$marketplace_ids", 0]},
+#                                 "else": None
+#                             }
+#                         }
+#                     }
+#                 }
+#             }
+#         },
+#         {
+#             "$lookup": {
+#                 "from": "marketplace",
+#                 "localField": "marketplace_id",
+#                 "foreignField": "_id",
+#                 "as": "marketplace_info"
+#             }
+#         },
+#         {"$unwind": {"path": "$marketplace_info", "preserveNullAndEmptyArrays": True}},
+#         {
+#             "$group": {
+#                 "_id": "$parent_sku",
+#                 "first_product": {"$first": "$$ROOT"},
+#                 "total_stock": {"$sum": {"$ifNull": ["$quantity", 0]}},
+#                 "total_quantity_ordered": {"$sum": "$total_quantity_ordered"},
+#                 "min_price": {"$min": {"$ifNull": ["$price", 0]}},
+#                 "max_price": {"$max": {"$ifNull": ["$price", 0]}},
+#                 "sku_count": {"$sum": 1},
+#                 "total_product_cost":{"$sum":{"$ifNull":['$product_cost',0]}},
+#                 "total_merchant_shipment_cost":{"$sum":{"$ifNull":['$merchant_shipment_cost',0]}},
+#                 'product_costs':{"$push":{"$ifNull":["$product_cost",0]}},
+#                 'merchant_shipment_costs':{"$push":{"$ifNull":["$merchant_shipment_cost",0]}},
+#                 "product_ids": {"$push": {"$toString": "$_id"}},
+#                 "vendor_funding_sum": {"$sum": {"$ifNull": ["$vendor_funding", 0]}},
+#                 "total_referral_fee":{"$sum":{"$ifNull":["$referral_fee",0]}},
+#                 "referral_fees":{"$push":{"$ifNull":['$referral_fee',0]}}
+#             }
+#         },
+#         {
+#             "$project": {
+#                 "_id": 0,
+#                 "parent_sku": "$_id",
+#                 "id": {"$toString": "$first_product._id"},
+#                 "title": {"$ifNull": ["$first_product.product_title", ""]},
+#                 "imageUrl": {"$ifNull": ["$first_product.image_url", ""]},
+#                 "marketplace": {"$ifNull": ["$first_product.marketplace_info.name", ""]},
+#                 "category": {"$ifNull": ["$first_product.category", ""]},
+#                 "product_id": {"$ifNull": ["$first_product.product_id", ""]},
+#                 "sku_count": 1,
+#                 "stock": "$total_stock",
+#                 "quantity_ordered": "$total_quantity_ordered",
+#                 "price_start": "$min_price",
+#                 "price_end": "$max_price",
+#                 'total_product_cost':1,
+#                 "total_merchant_shipment_cost":1,
+#                 "product_costs":1,
+#                 "merchant_shipment_costs":1,
+#                 "product_ids": 1,
+#                 "vendor_funding": "$vendor_funding_sum",
+#                 "total_referral_fee":1,
+#                 "referral_fees":1
+#             }
+#         }
+#     ])
+#     count_pipeline = pipeline + [{"$count": "total"}]
+#     total_result = list(Product.objects.aggregate(*count_pipeline))
+#     total_products=total_result[0]['total'] if total_result else 0
+#     max_page=max(1,math.ceil(total_products/page_size))
+#     page=min(page,max_page)
+#     if sort_by and sort_by in ["price_start", "price_end", "stock", "sku_count"]:
+#         pipeline.append({"$sort": {sort_by: int(sort_by_value)}})
+#     pipeline.extend([
+#         {"$skip": (page - 1) * page_size},
+#         {"$limit": page_size}
+#     ])
+#     products_result = list(Product.objects.aggregate(*pipeline))
+#     all_product_ids = []
+#     for group in products_result:
+#         all_product_ids.extend(group["product_ids"])
+#     sales_data = batch_get_sales_data_optimized(all_product_ids, start_date, end_date, today_start_date, today_end_date)
+#     processed_products = []
+#     for group in products_result:
+#         total_sales_today = 0
+#         total_units_today = 0
+#         total_revenue = 0
+#         total_net_profit = 0
+#         total_units_period = 0
+#         total_referral_fees_period=0
+#         total_revenue_period = 0
+#         total_net_profit_period = 0
+#         total_cogs_period=0
+#         avg_product_cost = group["total_product_cost"] / len(group["product_ids"]) if group["product_ids"] else 0
+#         avg_merchant_shipment_cost = group["total_merchant_shipment_cost"] / len(group["product_ids"]) if group["product_ids"] else 0
+#         avg_referral_fee=group['total_referral_fee']/len(group['product_ids']) if group['product_ids'] else 0
+#         for i,product_id in enumerate (group["product_ids"]):
+#             product_sales = sales_data.get(product_id, {
+#                 "today": {"revenue": 0, "units": 0},
+#                 "period": {"revenue": 0, "units": 0},
+#                 "compare": {"revenue": 0, "units": 0}
+#             })
+#             product_cost=(group['product_costs'][i] if i <len(group['product_costs'])else avg_product_cost)
+#             merchant_ship_cost=(group['merchant_shipment_costs'][i] if i <len(group['merchant_shipment_costs'])else avg_merchant_shipment_cost)
+#             units_sold_in_period=product_sales['period']['units']
+#             product_cogs=(product_cost*units_sold_in_period)+merchant_ship_cost
+#             total_cogs_period+=product_cogs
+#             # cogs = group["cogs"] / len(group["product_ids"])  
+#             vendor_funding = group["vendor_funding"] / len(group["product_ids"])  
+#             total_sales_today += product_sales["today"]["revenue"]
+#             total_units_today += product_sales["period"]["units"]
+#             total_revenue += product_sales["period"]["revenue"]
+#             period_profit = (product_sales["period"]["revenue"] - product_cogs + 
+#                    (vendor_funding * units_sold_in_period))
+#             total_net_profit += period_profit
+#             total_units_period += product_sales["compare"]["units"] - product_sales["period"]["units"]
+#             total_revenue_period += product_sales["compare"]["revenue"] - product_sales["period"]["revenue"]
+#             units_sold_compare=product_sales['compare']['units']
+#             referral_fee=(group['referral_fees'][i] if i <len(group['referral_fees']) else avg_referral_fee)
+#             compare_cogs=(product_cost*units_sold_compare)+merchant_ship_cost
+#             total_referral_fees_period+=referral_fee
+#             compare_profit = (product_sales["compare"]["revenue"] - compare_cogs + 
+#                             (vendor_funding * units_sold_compare))
+#             total_net_profit_period += compare_profit - period_profit
+#         margin = (total_net_profit / total_revenue) * 100 if total_revenue > 0 else 0
+#         margin_period = ((total_net_profit_period / (total_revenue + total_revenue_period)) * 100 if (total_revenue + total_revenue_period) > 0 else 0) - margin
+#         group.update({
+#             "salesForToday": round(total_sales_today, 2),
+#             "unitsSoldForToday": total_units_today,
+#             "unitsSoldForPeriod": total_units_period,
+#             "refunds": 0,
+#             "refundsforPeriod": 0,
+#             "refundsAmount": 0,
+#             "refundsAmountforPeriod": 0,
+#             "grossRevenue": round(total_revenue, 2),
+#             "grossRevenueforPeriod": round(total_revenue_period, 2),
+#             "netProfit": round(total_net_profit, 2),
+#             "netProfitforPeriod": round(total_net_profit_period, 2),
+#             "margin": round(margin, 2),
+#             "marginforPeriod": round(margin_period, 2),
+#             "cogs":round(total_cogs_period,2),
+#             'totalchannelFees':round(total_referral_fees_period,2)
+#         })
+#         group.pop("product_ids", None)
+#         group.pop("vendor_funding", None)
+#         group.pop("total_product_cost", None)
+#         group.pop("total_merchant_shipment_cost", None)
+#         group.pop("product_costs", None)
+#         group.pop("merchant_shipment_costs", None)
         
-        processed_products.append(group)
-    calculated_fields = {'salesForToday', 'unitsSoldForToday', 'grossRevenue', 'netProfit', 'margin', 
-                        'unitsSoldForPeriod', 'grossRevenueforPeriod', 'netProfitforPeriod', 'marginforPeriod'}
-    if sort_by and sort_by in calculated_fields:
-        reverse_sort = sort_by_value == -1
-        processed_products.sort(key=lambda x: x.get(sort_by, 0), reverse=reverse_sort)
-    response_data = {
-        "total_products": total_products,
-        "page": page,
-        "page_size": page_size,
-        "products": clean_json_floats(processed_products),
-        "tab_type": "parent"
-    }
-    return JsonResponse(response_data, safe=False)
+#         processed_products.append(group)
+#     calculated_fields = {'salesForToday', 'unitsSoldForToday', 'grossRevenue', 'netProfit', 'margin', 
+#                         'unitsSoldForPeriod', 'grossRevenueforPeriod', 'netProfitforPeriod', 'marginforPeriod'}
+#     if sort_by and sort_by in calculated_fields:
+#         reverse_sort = sort_by_value == -1
+#         processed_products.sort(key=lambda x: x.get(sort_by, 0), reverse=reverse_sort)
+#     response_data = {
+#         "total_products": total_products,
+#         "page": page,
+#         "page_size": page_size,
+#         "products": clean_json_floats(processed_products),
+#         "tab_type": "parent"
+#     }
+#     return JsonResponse(response_data, safe=False)
+
 
 def get_individual_products(match, page, page_size, start_date, end_date,
                           today_start_date, today_end_date, sort_by, sort_by_value):
@@ -2498,69 +2915,562 @@ def get_individual_products(match, page, page_size, start_date, end_date,
     }
     return JsonResponse(response_data, safe=False)
 
+from bson import ObjectId
 
-def batch_get_sales_data_optimized(product_ids, start_date, end_date, today_start_date, today_end_date):
+def batch_get_sales_data_optimized(
+    product_ids,
+    start_date,
+    end_date,
+    today_start_date,
+    today_end_date
+):
+
     if not product_ids:
         return {}
 
-    from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
+    compare_start, compare_end = getPreviousDateRange(
+        start_date,
+        end_date
+    )
 
-
-    compare_start, compare_end = getPreviousDateRange(start_date, end_date)
     sales_data = {}
 
-    # Adjust based on profiling
-    max_workers = 20
-    timeout_per_product = 5  # Seconds
+    try:
 
-    def get_data(product_id):
-        try:
-            return product_id, get_single_product_sales(
-                product_id,
-                today_start_date,
-                today_end_date,
-                start_date,
-                end_date,
-                compare_start,
-                compare_end
-            )
-        except Exception as e:
-            logger.warning(
-                f"Sales data fetch failed for product {product_id}: {str(e)}",
-                exc_info=True
-            )
-            return product_id, {
-                "today": {"revenue": 0, "units": 0},
-                "period": {"revenue": 0, "units": 0},
-                "compare": {"revenue": 0, "units": 0}
+        object_ids = [ObjectId(pid) for pid in product_ids]
+
+        from datetime import datetime, timezone
+
+        def normalize_datetime(value):
+
+            if isinstance(value, str):
+
+                formats = [
+                    "%Y-%m-%d",
+                    "%Y-%m-%d %H:%M:%S",
+                    "%Y-%m-%d %H:%M:%S.%f"
+                ]
+
+                for fmt in formats:
+                    try:
+                        value = datetime.strptime(value, fmt)
+                        break
+                    except:
+                        pass
+
+            if not isinstance(value, datetime):
+                raise ValueError(
+                    f"Invalid date value: {value}"
+                )
+
+            # Convert everything to UTC-aware
+            if value.tzinfo is None:
+                value = value.replace(
+                    tzinfo=timezone.utc
+                )
+            else:
+                value = value.astimezone(
+                    timezone.utc
+                )
+
+            return value
+
+        
+        start_date = normalize_datetime(start_date)
+        end_date = normalize_datetime(end_date)
+
+        today_start_date = normalize_datetime(today_start_date)
+        today_end_date = normalize_datetime(today_end_date)
+
+        compare_start = normalize_datetime(compare_start)
+        compare_end = normalize_datetime(compare_end)
+
+        dates = [
+            compare_start,
+            compare_end,
+            start_date,
+            end_date,
+            today_start_date,
+            today_end_date
+        ]
+
+        overall_start = min(dates)
+        overall_end = max(dates)
+
+        pipeline = [
+
+            {
+                "$match": {
+                    "order_date": {
+                        "$gte": overall_start,
+                        "$lte": overall_end
+                    },
+                    "order_status": {
+                        "$in": [
+                            'Shipped',
+                            'Delivered',
+                            'Acknowledged',
+                            'Pending',
+                            'Unshipped',
+                            'PartiallyShipped'
+                        ]
+                    }
+                }
+            },
+
+            {
+                "$lookup": {
+                    "from": "order_items",
+                    "localField": "order_items",
+                    "foreignField": "_id",
+                    "as": "order_items_ins"
+                }
+            },
+
+            {
+                "$unwind": "$order_items_ins"
+            },
+
+            {
+                "$match": {
+                    "order_items_ins.ProductDetails.product_id": {
+                        "$in": object_ids
+                    }
+                }
+            },
+
+            {
+                "$project": {
+
+                    "product_id":
+                        "$order_items_ins.ProductDetails.product_id",
+
+                    "quantity":
+                        "$order_items_ins.ProductDetails.QuantityOrdered",
+
+                    "price":
+                        "$order_items_ins.Pricing.ItemPrice.Amount",
+
+                    "cost": {
+                        "$multiply": [
+                            "$order_items_ins.ProductDetails.product_cost",
+                            "$order_items_ins.ProductDetails.QuantityOrdered"
+                        ]
+                    },
+
+                    "merchant_cost": {
+                        "$divide": [
+                            "$merchant_shipment_cost",
+                            {
+                                "$size": "$order_items"
+                            }
+                        ]
+                    },
+
+                    # KEEP extra fields
+                    "category":
+                        "$order_items_ins.ProductDetails.category",
+
+                    "listing":
+                        "$order_items_ins.ProductDetails.listing",
+
+                    "order_date": 1
+                }
+            },
+
+            {
+                "$group": {
+
+                    "_id": "$product_id",
+
+                    ################################################
+                    # TODAY
+                    ################################################
+
+                    "today_revenue": {
+                        "$sum": {
+                            "$cond": [
+                                {
+                                    "$and": [
+                                        {
+                                            "$gte": [
+                                                "$order_date",
+                                                today_start_date
+                                            ]
+                                        },
+                                        {
+                                            "$lte": [
+                                                "$order_date",
+                                                today_end_date
+                                            ]
+                                        }
+                                    ]
+                                },
+                                "$price",
+                                0
+                            ]
+                        }
+                    },
+
+                    "today_units": {
+                        "$sum": {
+                            "$cond": [
+                                {
+                                    "$and": [
+                                        {
+                                            "$gte": [
+                                                "$order_date",
+                                                today_start_date
+                                            ]
+                                        },
+                                        {
+                                            "$lte": [
+                                                "$order_date",
+                                                today_end_date
+                                            ]
+                                        }
+                                    ]
+                                },
+                                "$quantity",
+                                0
+                            ]
+                        }
+                    },
+
+                    "today_cost": {
+                        "$sum": {
+                            "$cond": [
+                                {
+                                    "$and": [
+                                        {
+                                            "$gte": [
+                                                "$order_date",
+                                                today_start_date
+                                            ]
+                                        },
+                                        {
+                                            "$lte": [
+                                                "$order_date",
+                                                today_end_date
+                                            ]
+                                        }
+                                    ]
+                                },
+                                "$cost",
+                                0
+                            ]
+                        }
+                    },
+
+                    "today_merchant_cost": {
+                        "$sum": {
+                            "$cond": [
+                                {
+                                    "$and": [
+                                        {
+                                            "$gte": [
+                                                "$order_date",
+                                                today_start_date
+                                            ]
+                                        },
+                                        {
+                                            "$lte": [
+                                                "$order_date",
+                                                today_end_date
+                                            ]
+                                        }
+                                    ]
+                                },
+                                "$merchant_cost",
+                                0
+                            ]
+                        }
+                    },
+
+                    ################################################
+                    # PERIOD
+                    ################################################
+
+                    "period_revenue": {
+                        "$sum": {
+                            "$cond": [
+                                {
+                                    "$and": [
+                                        {"$gte": ["$order_date", start_date]},
+                                        {"$lte": ["$order_date", end_date]}
+                                    ]
+                                },
+                                "$price",
+                                0
+                            ]
+                        }
+                    },
+
+                    "period_units": {
+                        "$sum": {
+                            "$cond": [
+                                {
+                                    "$and": [
+                                        {"$gte": ["$order_date", start_date]},
+                                        {"$lte": ["$order_date", end_date]}
+                                    ]
+                                },
+                                "$quantity",
+                                0
+                            ]
+                        }
+                    },
+
+                    "period_cost": {
+                        "$sum": {
+                            "$cond": [
+                                {
+                                    "$and": [
+                                        {"$gte": ["$order_date", start_date]},
+                                        {"$lte": ["$order_date", end_date]}
+                                    ]
+                                },
+                                "$cost",
+                                0
+                            ]
+                        }
+                    },
+
+                    "period_merchant_cost": {
+                        "$sum": {
+                            "$cond": [
+                                {
+                                    "$and": [
+                                        {"$gte": ["$order_date", start_date]},
+                                        {"$lte": ["$order_date", end_date]}
+                                    ]
+                                },
+                                "$merchant_cost",
+                                0
+                            ]
+                        }
+                    },
+
+                    ################################################
+                    # COMPARE
+                    ################################################
+
+                    "compare_revenue": {
+                        "$sum": {
+                            "$cond": [
+                                {
+                                    "$and": [
+                                        {"$gte": ["$order_date", compare_start]},
+                                        {"$lte": ["$order_date", compare_end]}
+                                    ]
+                                },
+                                "$price",
+                                0
+                            ]
+                        }
+                    },
+
+                    "compare_units": {
+                        "$sum": {
+                            "$cond": [
+                                {
+                                    "$and": [
+                                        {"$gte": ["$order_date", compare_start]},
+                                        {"$lte": ["$order_date", compare_end]}
+                                    ]
+                                },
+                                "$quantity",
+                                0
+                            ]
+                        }
+                    },
+
+                    "compare_cost": {
+                        "$sum": {
+                            "$cond": [
+                                {
+                                    "$and": [
+                                        {"$gte": ["$order_date", compare_start]},
+                                        {"$lte": ["$order_date", compare_end]}
+                                    ]
+                                },
+                                "$cost",
+                                0
+                            ]
+                        }
+                    },
+
+                    "compare_merchant_cost": {
+                        "$sum": {
+                            "$cond": [
+                                {
+                                    "$and": [
+                                        {"$gte": ["$order_date", compare_start]},
+                                        {"$lte": ["$order_date", compare_end]}
+                                    ]
+                                },
+                                "$merchant_cost",
+                                0
+                            ]
+                        }
+                    },
+
+                    # Keep fields
+                    "category": {
+                        "$first": "$category"
+                    },
+
+                    "listing": {
+                        "$first": "$listing"
+                    }
+                }
             }
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_product = {
-            executor.submit(get_data, product_id): product_id for product_id in product_ids
-        }
+        ]
 
-        for future in as_completed(future_to_product, timeout=(len(product_ids) * timeout_per_product)):
-            product_id = future_to_product[future]
-            try:
-                pid, data = future.result(timeout=timeout_per_product)
-                sales_data[pid] = data
-            except TimeoutError:
-                logger.error(f"Timeout for product {product_id}")
-                sales_data[product_id] = {
-                    "today": {"revenue": 0, "units": 0},
-                    "period": {"revenue": 0, "units": 0},
-                    "compare": {"revenue": 0, "units": 0}
-                }
-            except Exception as e:
-                logger.exception(f"Unexpected error retrieving sales data for product {product_id}")
-                sales_data[product_id] = {
-                    "today": {"revenue": 0, "units": 0},
-                    "period": {"revenue": 0, "units": 0},
-                    "compare": {"revenue": 0, "units": 0}
-                }
+        results = list(
+            Order.objects.aggregate(
+                *pipeline,
+                allowDiskUse=True
+            )
+        )
 
-    return sales_data
+        for pid in product_ids:
+
+            sales_data[pid] = {
+
+                "today": {
+                    "revenue": 0,
+                    "units": 0,
+                    "cost": 0,
+                    "merchant_cost": 0
+                },
+
+                "period": {
+                    "revenue": 0,
+                    "units": 0,
+                    "cost": 0,
+                    "merchant_cost": 0
+                },
+
+                "compare": {
+                    "revenue": 0,
+                    "units": 0,
+                    "cost": 0,
+                    "merchant_cost": 0
+                }
+            }
+
+        for row in results:
+
+            pid = str(row["_id"])
+
+            sales_data[pid] = {
+
+                "category": row.get("category"),
+                "listing": row.get("listing"),
+
+                "today": {
+                    "revenue": round(row["today_revenue"],2),
+                    "units": row["today_units"],
+                    "cost": round(row["today_cost"],2),
+                    "merchant_cost": round(
+                        row["today_merchant_cost"],2
+                    )
+                },
+
+                "period": {
+                    "revenue": round(row["period_revenue"],2),
+                    "units": row["period_units"],
+                    "cost": round(row["period_cost"],2),
+                    "merchant_cost": round(
+                        row["period_merchant_cost"],2
+                    )
+                },
+
+                "compare": {
+                    "revenue": round(row["compare_revenue"],2),
+                    "units": row["compare_units"],
+                    "cost": round(row["compare_cost"],2),
+                    "merchant_cost": round(
+                        row["compare_merchant_cost"],2
+                    )
+                }
+            }
+
+        return sales_data
+
+    except Exception as e:
+
+        logger.exception(
+            f"Sales aggregation failed: {str(e)}"
+        )
+
+        return {}
+
+# def batch_get_sales_data_optimized(product_ids, start_date, end_date, today_start_date, today_end_date):
+#     if not product_ids:
+#         return {}
+
+#     from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
+
+
+#     compare_start, compare_end = getPreviousDateRange(start_date, end_date)
+#     sales_data = {}
+
+#     # Adjust based on profiling
+#     max_workers = 20
+#     timeout_per_product = 5  # Seconds
+
+#     def get_data(product_id):
+#         try:
+#             return product_id, get_single_product_sales(
+#                 product_id,
+#                 today_start_date,
+#                 today_end_date,
+#                 start_date,
+#                 end_date,
+#                 compare_start,
+#                 compare_end
+#             )
+#         except Exception as e:
+#             logger.warning(
+#                 f"Sales data fetch failed for product {product_id}: {str(e)}",
+#                 exc_info=True
+#             )
+#             return product_id, {
+#                 "today": {"revenue": 0, "units": 0},
+#                 "period": {"revenue": 0, "units": 0},
+#                 "compare": {"revenue": 0, "units": 0}
+#             }
+
+#     with ThreadPoolExecutor(max_workers=max_workers) as executor:
+#         future_to_product = {
+#             executor.submit(get_data, product_id): product_id for product_id in product_ids
+#         }
+
+#         for future in as_completed(future_to_product, timeout=(len(product_ids) * timeout_per_product)):
+#             product_id = future_to_product[future]
+#             try:
+#                 pid, data = future.result(timeout=timeout_per_product)
+#                 sales_data[pid] = data
+#             except TimeoutError:
+#                 logger.error(f"Timeout for product {product_id}")
+#                 sales_data[product_id] = {
+#                     "today": {"revenue": 0, "units": 0},
+#                     "period": {"revenue": 0, "units": 0},
+#                     "compare": {"revenue": 0, "units": 0}
+#                 }
+#             except Exception as e:
+#                 logger.exception(f"Unexpected error retrieving sales data for product {product_id}")
+#                 sales_data[product_id] = {
+#                     "today": {"revenue": 0, "units": 0},
+#                     "period": {"revenue": 0, "units": 0},
+#                     "compare": {"revenue": 0, "units": 0}
+#                 }
+
+#     return sales_data
+
 
 def get_single_product_sales(product_id, today_start_date, today_end_date, 
                            start_date, end_date, compare_start, compare_end):
@@ -2589,6 +3499,8 @@ def get_single_product_sales(product_id, today_start_date, today_end_date,
             "period": {"revenue": 0, "units": 0},
             "compare": {"revenue": 0, "units": 0}
         }
+
+
 def clean_json_floats(obj):
     if isinstance(obj, float):
         return None if (math.isnan(obj) or math.isinf(obj)) else obj
