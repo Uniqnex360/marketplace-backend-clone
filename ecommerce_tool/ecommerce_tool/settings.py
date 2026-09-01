@@ -57,6 +57,8 @@ CSRF_TRUSTED_ORIGINS = [
     "https://marketplace-frontend-development.vercel.app",
     "https://marketplace-integration-app.vercel.app",
     "https://b2bop.netlify.app",
+    "http://98.93.11.169.nip.io/",
+    "https://98.93.11.169.nip.io/",
 ]
 
 
@@ -157,7 +159,6 @@ WSGI_APPLICATION = "ecommerce_tool.wsgi.application"
 # MongoDB connection settings for mongoengine
 from mongoengine import connect
 
-
 DATABASE_HOST = os.getenv("DATABASE_HOST")
 
 connect(
@@ -250,14 +251,14 @@ SELLERCLOUD_SERVER_ID = os.getenv(
 SHIPSTATION_API_SECRET = os.getenv("SHIPSTATION_API_SECRET")
 SHIPSTATION_API_KEY = os.getenv("SHIPSTATION_API_KEY")
 
-#Clickhouse
-CLICKHOUSE_HOST=os.getenv("CLICKHOUSE_HOST")
-CLICKHOUSE_PORT=os.getenv("CLICKHOUSE_PORT")
-CLICKHOUSE_DB=os.getenv("CLICKHOUSE_DB")
-CLICKHOUSE_USER=os.getenv("CLICKHOUSE_USER")
-CLICKHOUSE_PASSWORD=os.getenv("CLICKHOUSE_PASSWORD")
+# Clickhouse
+CLICKHOUSE_HOST = os.getenv("CLICKHOUSE_HOST")
+CLICKHOUSE_PORT = os.getenv("CLICKHOUSE_PORT")
+CLICKHOUSE_DB = os.getenv("CLICKHOUSE_DB")
+CLICKHOUSE_USER = os.getenv("CLICKHOUSE_USER")
+CLICKHOUSE_PASSWORD = os.getenv("CLICKHOUSE_PASSWORD")
 
-#Redis
+# Redis
 CELERY_BROKER_URL = "redis://redis:6379/0"
 CELERY_RESULT_BACKEND = "redis://redis:6379/0"
 
