@@ -112,7 +112,7 @@ def create_fact_order_items_table(request):
         query = """
         ALTER TABLE daas.fact_order_items
         DELETE WHERE order_date_day >= '2026-06-01'
-        AND order_date_day <= '2026-06-30';
+        AND order_date_day <= '2026-09-30';
         """
         client.command(query)
 

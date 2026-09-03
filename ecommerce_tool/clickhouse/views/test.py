@@ -1,22 +1,39 @@
+from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from clickhouse.config import client
 from clickhouse.common import send_error_response, send_response
+from omnisight.models import OrderItems, Order
+
+
+from datetime import datetime
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from clickhouse.config import client
 
 
 @csrf_exempt
 def clickhouse_test_url(request):
-    """health check query for clickhouse"""
+    """Only creates a full backup table of fact_order_items"""
+
+    timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_table = f"fact_order_items_backup_{timestamp_str}"
 
     try:
-        # Simple health check query
-        result = client.command("SELECT 1")
-        return send_response()
+        # Create backup table structure
+        client.command(f"CREATE TABLE {backup_table} AS fact_order_items;")
+
+        # Copy all data to backup table
+        client.command(f"INSERT INTO {backup_table} SELECT * FROM fact_order_items;")
+
+        return JsonResponse(
+            {
+                "status": True,
+                "message": f"Backup created successfully as '{backup_table}'. No data modified.",
+            }
+        )
 
     except Exception as e:
-        return send_error_response(e)
-
-
-from omnisight.models import OrderItems, Order
+        return JsonResponse({"status": False, "message": str(e)}, status=500)
 
 
 @csrf_exempt
@@ -51,10 +68,7 @@ def get_all_order_ids(request):
 
         order_ids = [row[0] for row in result] if result else []
 
-        return send_response({
-            "count": len(order_ids),
-            "order_ids": order_ids
-        })
+        return send_response({"count": len(order_ids), "order_ids": order_ids})
 
     except Exception as e:
         return send_error_response(e)

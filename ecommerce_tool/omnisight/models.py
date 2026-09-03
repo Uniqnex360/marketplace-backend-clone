@@ -3,7 +3,21 @@ from email.policy import default
 from math import inf
 
 from click import DateTime
-from mongoengine import Document, StringField,DynamicField, FloatField,ObjectIdField, IntField, BooleanField, DictField, ListField, EmbeddedDocument, EmbeddedDocumentField,ReferenceField, DateTimeField
+from mongoengine import (
+    Document,
+    StringField,
+    DynamicField,
+    FloatField,
+    ObjectIdField,
+    IntField,
+    BooleanField,
+    DictField,
+    ListField,
+    EmbeddedDocument,
+    EmbeddedDocumentField,
+    ReferenceField,
+    DateTimeField,
+)
 from mongoengine.errors import ValidationError
 import re
 import random
@@ -11,37 +25,52 @@ from datetime import datetime, timedelta
 from bson import ObjectId
 import pandas as pd
 from ecommerce_tool.crud import DatabaseModel
+
+
 class Marketplace(Document):
     name = StringField()  # Marketplace name
     url = StringField()  # Marketplace URL
     image_url = StringField()  # Marketplace logo URL
     created_at = StringField()  # Timestamp when the marketplace was added
     updated_at = StringField()  # Timestamp when the marketplace was last updated
-    
+
+
 class Category(Document):
     name = StringField(required=True)  # Category name
-    parent_category_id = ReferenceField('self', null=True)  # Parent category (if applicable)
+    parent_category_id = ReferenceField(
+        "self", null=True
+    )  # Parent category (if applicable)
     marketplace_id = ReferenceField(Marketplace)  # Reference to the marketplace
     breadcrumb_path = ListField(StringField())  # Hierarchical category path
     level = IntField()  # Category level
     created_at = StringField()  # Timestamp when the category was added
     updated_at = StringField()  # Timestamp when the category was last updated
-    end_level = BooleanField(default=False)  # Whether the category is the last level in the hierarchy
+    end_level = BooleanField(
+        default=False
+    )  # Whether the category is the last level in the hierarchy
+
+
 class Brand(Document):
     name = StringField()  # Brand name
     description = StringField()  # Brand description
     website = StringField()  # Brand website
     marketplace_id = ReferenceField(Marketplace)  # Reference to the marketplace
-    marketplace_ids = ListField(ReferenceField(Marketplace),default=[])  # List of Marketplace IDs
+    marketplace_ids = ListField(
+        ReferenceField(Marketplace), default=[]
+    )  # List of Marketplace IDs
+
+
 class Manufacturer(Document):
     name = StringField()  # Manufacturer name
     description = StringField()  # Manufacturer description
     website = StringField()  # Manufacturer website
     marketplace_id = ReferenceField(Marketplace)  # Reference to the marketplace
+
+
 class Product(Document):
     # General Product Details
     product_title = StringField()
-    wpid = StringField()  
+    wpid = StringField()
     product_description = StringField()
     product_id = DynamicField()  # Can store ASIN, UPC, GTIN, WPID
     product_id_type = StringField()
@@ -51,10 +80,10 @@ class Product(Document):
     quantity_unit = StringField()
     item_condition = StringField()
     item_note = StringField()  # Additional notes about item condition
-    #SKU Details
+    # SKU Details
     sku = StringField()
     master_sku = DynamicField()  # Master SKU for parent-child relationships
-    parent_sku = StringField()  # Parent SKU for child products 
+    parent_sku = StringField()  # Parent SKU for child products
     # Platform-Specific Identifiers
     listing_id = StringField()  # Amazon Listing ID
     upc = StringField()  # Universal Product Code
@@ -62,7 +91,7 @@ class Product(Document):
     asin = StringField()  # Amazon Standard Identification Number
     model_number = StringField()
     # Image & Category
-    image_url = StringField() # Main image URL
+    image_url = StringField()  # Main image URL
     image_urls = ListField(StringField())  # Additional image URLs
     zshop_category = StringField()
     zshop_browse_path = StringField()
@@ -100,54 +129,68 @@ class Product(Document):
     manufacturer_name = StringField()  # Manufacturer name
     manufacturer_id = ReferenceField(Manufacturer)  # Reference to the manufacturer
     marketplace_id = ReferenceField(Marketplace)  # Reference to the marketplace
-    created_at = DateTimeField(default=datetime.now())  # Timestamp when the product was added
-    updated_at = DateTimeField(default=datetime.now())  # Timestamp when the product was last updated
+    created_at = DateTimeField(
+        default=datetime.now()
+    )  # Timestamp when the product was added
+    updated_at = DateTimeField(
+        default=datetime.now()
+    )  # Timestamp when the product was last updated
     cogs = FloatField(default=0.0)  # Cost of Goods Sold
     shipping_cost = FloatField(default=0.0)  # Shipping cost
-    page_views = IntField(default=0) #dummy data
-    refund = IntField(default=0) #dummy data
-    sessions = IntField(default=0) #dummy data
+    page_views = IntField(default=0)  # dummy data
+    refund = IntField(default=0)  # dummy data
+    sessions = IntField(default=0)  # dummy data
     listing_quality_score = FloatField(default=0.0)  # Score based on listing quality
     product_url = StringField()  # URL to the product page
     videos = ListField(StringField())  # List of video URLs
     new_product = BooleanField(default=False)  # Flag for new products
-    #AMAZON Details
-    fullfillment_by_channel = BooleanField(default=False)  # Flag for Fulfilled by Amazon
+    # AMAZON Details
+    fullfillment_by_channel = BooleanField(
+        default=False
+    )  # Flag for Fulfilled by Amazon
     channel_fee = FloatField(default=0.0)  # Amazon fees
     fullfillment_by_channel_fee = FloatField(default=0.0)  # FBA fees
     vendor_funding = FloatField(default=0.0)  # Vendor funding amount
     vendor_discount = FloatField(default=0.0)  # Vendor discount amount
-    marketplace_ids = ListField(ReferenceField(Marketplace),default=[])  # List of Marketplace IDs
+    marketplace_ids = ListField(
+        ReferenceField(Marketplace), default=[]
+    )  # List of Marketplace IDs
     product_cost = FloatField(default=0.0)  # Cost of the product
     referral_fee = FloatField(default=0.0)  # Referral fee for the product
     a_shipping_cost = FloatField(default=0.0)  # Amazon shipping cost
     total_cogs = FloatField(default=0.0)  # Total cost of goods sold
-    product_created_date = DateTimeField(default=datetime.now())  # Date when the product was created
-    producted_last_updated_date = DateTimeField(default=datetime.now())  # Date when the product was last updated
-    w_product_cost = FloatField(default=0.0)# Walmart product cost
+    product_created_date = DateTimeField(
+        default=datetime.now()
+    )  # Date when the product was created
+    producted_last_updated_date = DateTimeField(
+        default=datetime.now()
+    )  # Date when the product was last updated
+    w_product_cost = FloatField(default=0.0)  # Walmart product cost
     walmart_fee = FloatField(default=0.0)  # Walmart fees
     w_shiping_cost = FloatField(default=0.0)  # Walmart shipping cost
     w_total_cogs = FloatField(default=0.0)  # Total cost of goods sold for Walmart
     pack_size = IntField(default=0)  # Size of the product pack
     meta = {
-         "strict": False,
-        'indexes': [
-            'marketplace_id',
-            'brand_id',
-            'manufacturer_name',
-            'sku',
-            'asin',
-            ['marketplace_id', 'brand_id'],
-            ['marketplace_id', 'manufacturer_name']
-        ]
+        "strict": False,
+        "indexes": [
+            "marketplace_id",
+            "brand_id",
+            "manufacturer_name",
+            "sku",
+            "asin",
+            ["marketplace_id", "brand_id"],
+            ["marketplace_id", "manufacturer_name"],
+        ],
     }
+
+
 class CachedMetrics(Document):
     cache_hash = StringField(required=True, unique=True)
-    marketplace_id = ReferenceField(Marketplace, null=True) 
-    brand_ids = ListField(ReferenceField(Brand), default=[]) 
+    marketplace_id = ReferenceField(Marketplace, null=True)
+    brand_ids = ListField(ReferenceField(Brand), default=[])
     product_ids = ListField(ReferenceField(Product), default=[])
     manufacturer_names = ListField(StringField(), default=[])
-    fulfillment_channel = StringField(default=None) 
+    fulfillment_channel = StringField(default=None)
     from_date = DateTimeField(required=True)
     to_date = DateTimeField(required=True)
     gross_revenue = FloatField(default=0.0)
@@ -164,25 +207,34 @@ class CachedMetrics(Document):
     unit_session_percentage = FloatField(default=0.0)
     roi = FloatField(default=0.0)
     last_updated = DateTimeField(default=datetime.utcnow)
-    extra_data = DictField() 
-    meta = {'indexes': [
-        {'fields': ['cache_hash'], 'unique': True},
-        {'fields': ['marketplace_id', 'from_date', 'to_date']},
-        {'fields': ['brand_ids']}, 
-        {'fields': ['last_updated'], 'expireAfterSeconds': 3600 * 24 * 7}
-    ]}
+    extra_data = DictField()
+    meta = {
+        "indexes": [
+            {"fields": ["cache_hash"], "unique": True},
+            {"fields": ["marketplace_id", "from_date", "to_date"]},
+            {"fields": ["brand_ids"]},
+            {"fields": ["last_updated"], "expireAfterSeconds": 3600 * 24 * 7},
+        ]
+    }
+
 
 class ignore_api_functions(Document):
     name = StringField()
+
+
 class mail_template(Document):
     code = StringField()
     subject = StringField()
     default_template = StringField()
     cutomize_template = StringField()
+
+
 class role(Document):
     name = StringField()
     description = StringField()
     priority = IntField()
+
+
 class user(Document):
     first_name = StringField()
     last_name = StringField()
@@ -202,20 +254,28 @@ class user(Document):
     creation_date = DateTimeField(default=datetime.now())
     credentilas = ListField(DictField())
     updated_at = DateTimeField(default=datetime.utcnow)
+
+
 class access_token(Document):
     user_id = ReferenceField(user)
     access_token_str = StringField()
     creation_time = DateTimeField(default=datetime.now())
     updation_time = DateTimeField(default=datetime.now())
     marketplace_id = ReferenceField(Marketplace)
+
+
 class Money(EmbeddedDocument):
     CurrencyCode = StringField(required=True)
-    Amount = FloatField(required=True,default=0.0)
+    Amount = FloatField(required=True, default=0.0)
+
+
 class Pricing(EmbeddedDocument):
     ItemPrice = EmbeddedDocumentField(Money, required=True)
     ItemTax = EmbeddedDocumentField(Money, default=None)
     PromotionDiscount = EmbeddedDocumentField(Money, default=None)
-    ShipPromotionDiscount=EmbeddedDocumentField(Money,default=None)
+    ShipPromotionDiscount = EmbeddedDocumentField(Money, default=None)
+
+
 class ProductDetails(EmbeddedDocument):
     product_id = ReferenceField(Product)
     Title = StringField(required=True)
@@ -224,6 +284,8 @@ class ProductDetails(EmbeddedDocument):
     Condition = StringField(default=None)
     QuantityOrdered = IntField(required=True)
     QuantityShipped = IntField(required=True)
+
+
 class Fulfillment(EmbeddedDocument):
     FulfillmentOption = StringField(default=None)
     ShipMethod = StringField(default=None)
@@ -231,56 +293,72 @@ class Fulfillment(EmbeddedDocument):
     TrackingNumber = StringField(default=None)
     TrackingURL = StringField(default=None)
     ShipDateTime = DateTimeField(default=None)
+
+
 class OrderStatus(EmbeddedDocument):
     STATUS_CHOICES = ("Pending", "Shipped", "Delivered", "Canceled", "Returned")
     Status = StringField(required=True)
     StatusDate = DateTimeField(required=True)
+
+
 class TaxCollection(EmbeddedDocument):
     Model = StringField(required=True)
     ResponsibleParty = StringField(required=True)
+
+
 class BuyerInfo(EmbeddedDocument):
     Name = StringField(default=None)
     Email = StringField(default=None)
     Address = DictField(default=None)
+
+
 class OrderItems(Document):
     OrderId = StringField()
     Platform = StringField()
-    ProductDetails = EmbeddedDocumentField(ProductDetails, )
-    Pricing = EmbeddedDocumentField(Pricing, )
+    ProductDetails = EmbeddedDocumentField(
+        ProductDetails,
+    )
+    Pricing = EmbeddedDocumentField(
+        Pricing,
+    )
     Fulfillment = EmbeddedDocumentField(Fulfillment, default=None)
     OrderStatus = EmbeddedDocumentField(OrderStatus, default=None)
-    TaxCollection = EmbeddedDocumentField(TaxCollection, )
+    TaxCollection = EmbeddedDocumentField(
+        TaxCollection,
+    )
     IsGift = BooleanField()
     BuyerInfo = EmbeddedDocumentField(BuyerInfo, default=None)
     created_date = DateTimeField(default=datetime.now())
     document_created_date = DateTimeField()
     PromotionDiscount = FloatField(required=False)
     net_profit = FloatField(default=0.0)
-    tax_checked=BooleanField(default=False)
-    pricing_checked=BooleanField(default=False)
+    tax_checked = BooleanField(default=False)
+    pricing_checked = BooleanField(default=False)
     updated_at = DateTimeField(default=datetime.utcnow)
     meta = {
-        'indexes': [
-            'ProductDetails.product_id',
-            'created_date',
-            ['created_date', 'ProductDetails.product_id']
+        "indexes": [
+            "ProductDetails.product_id",
+            "created_date",
+            ["created_date", "ProductDetails.product_id"],
         ],
         "strict": False,
     }
+
+
 class Order(Document):
     # Tracking IDs
     purchase_order_id = StringField()  # ID generated after a customer orders a product
     customer_order_id = StringField()  # ID from the customer's perspective for tracking
     seller_order_id = StringField()  # ID used by the seller for internal purposes
     merchant_order_id = StringField()  # ID used by the merchant for internal purposes
-    shipstation_id=StringField()
-    shipstation_synced=BooleanField(default=False)
-    shipstation_sync_date=DateTimeField()
-    shipping_rates_fetched=BooleanField(default=False)
-    shipping_rates_date=DateTimeField()
-    shipping_cost=FloatField(default=0.0)
-    tracking_number=StringField()
-    merchant_shipment_cost=FloatField()
+    shipstation_id = StringField()
+    shipstation_synced = BooleanField(default=False)
+    shipstation_sync_date = DateTimeField()
+    shipping_rates_fetched = BooleanField(default=False)
+    shipping_rates_date = DateTimeField()
+    shipping_cost = FloatField(default=0.0)
+    tracking_number = StringField()
+    merchant_shipment_cost = FloatField()
     # Customer details
     customer_email_id = StringField()  # Email of the customer
     # Order timing
@@ -290,13 +368,23 @@ class Order(Document):
     latest_ship_date = DateTimeField()  # Maximum date for product delivery
     last_update_date = DateTimeField()  # Most recent order update date
     # Shipping information
-    shipping_information = DictField()  # Contains nested address/details for customer delivery
+    shipping_information = (
+        DictField()
+    )  # Contains nested address/details for customer delivery
     ship_service_level = StringField()  # Shipping speed or service
-    shipment_service_level_category = StringField()  # High-level service category (e.g., express, standard)
-    automated_shipping_settings = DictField()  # Amazon settings for automatically selecting shipping methods
+    shipment_service_level_category = (
+        StringField()
+    )  # High-level service category (e.g., express, standard)
+    automated_shipping_settings = (
+        DictField()
+    )  # Amazon settings for automatically selecting shipping methods
     # Order details and status
-    order_details = ListField(DictField())  # List of order lines with details for each ordered item
-    order_items =  ListField(ReferenceField(OrderItems))  # List of order lines with details for each ordered item
+    order_details = ListField(
+        DictField()
+    )  # List of order lines with details for each ordered item
+    order_items = ListField(
+        ReferenceField(OrderItems)
+    )  # List of order lines with details for each ordered item
     order_status = StringField()  # Tracking order lifecycle
     number_of_items_shipped = IntField()  # Number of items that have been shipped
     number_of_items_unshipped = IntField()  # Number of items pending shipment
@@ -305,51 +393,71 @@ class Order(Document):
     fulfillment_channel = StringField()  # Who is fulfilling the order
     sales_channel = StringField()  # The channel through which the order was placed
     order_type = StringField()  # Order type based on purchase basis
-    is_premium_order = BooleanField()  # Indicates whether premium cost applies for non-prime members
+    is_premium_order = (
+        BooleanField()
+    )  # Indicates whether premium cost applies for non-prime members
     is_prime = BooleanField()  # True if the order is placed by a prime account
-    has_regulated_items = BooleanField()  # True if order includes items requiring special handling
-    is_replacement_order = BooleanField()  # True if the order is a replacement due to defects, lost items, etc.
+    has_regulated_items = (
+        BooleanField()
+    )  # True if order includes items requiring special handling
+    is_replacement_order = (
+        BooleanField()
+    )  # True if the order is a replacement due to defects, lost items, etc.
     is_sold_by_ab = BooleanField()  # True if the product is sold directly by Amazon
     is_ispu = BooleanField()  # True if the order is meant for in-store pickup
-    is_access_point_order = BooleanField()  # True if the order uses an access point location (e.g., lockers)
+    is_access_point_order = (
+        BooleanField()
+    )  # True if the order uses an access point location (e.g., lockers)
     is_business_order = BooleanField()  # True if this is a business (B2B) order
     # Marketplace and payment
     marketplace = StringField()  # Marketplace from which the order originated
     marketplace_id = ReferenceField(Marketplace)  # Identifier for the marketplace
     payment_method = StringField()  # Type of payment used
-    payment_method_details = StringField()  # Detailed information about the payment method
-    order_total = FloatField(default=0.0)  # Total order cost including products, shipping, and taxes
+    payment_method_details = (
+        StringField()
+    )  # Detailed information about the payment method
+    order_total = FloatField(
+        default=0.0
+    )  # Total order cost including products, shipping, and taxes
     currency = StringField()  # Currency used for the order
-    is_global_express_enabled = BooleanField()  # True if fast shipping is available for international orders
+    is_global_express_enabled = (
+        BooleanField()
+    )  # True if fast shipping is available for international orders
     customer_name = StringField()
     order_channel = StringField()  # The channel through which the order was placed
     items_order_quantity = IntField(default=0)  # Number of items in the order
     shipping_price = FloatField(default=0.0)  # Shipping cost for the order
     meta = {
-        'indexes': [
-            'marketplace_id',
-            'order_date',
-            'fulfillment_channel',
-            ['order_date', 'marketplace_id'],
-            ['order_date', 'fulfillment_channel'],
-            ['marketplace_id', 'order_date', 'fulfillment_channel'],
-            'purchase_order_id',
-            'order_items'  # For $lookup operations
-        ]
+        "indexes": [
+            "marketplace_id",
+            "order_date",
+            "fulfillment_channel",
+            ["order_date", "marketplace_id"],
+            ["order_date", "fulfillment_channel"],
+            ["marketplace_id", "order_date", "fulfillment_channel"],
+            "purchase_order_id",
+            "order_items",  # For $lookup operations
+        ],
+        "strict": False,
     }
+
     def save(self, *args, **kwargs):
         self.updated_at = datetime.utcnow()
         return super(Order, self).save(*args, **kwargs)
+
+
 class ShippingRate(Document):
-    order=ReferenceField(Order)
-    carrier=StringField()
-    service=StringField()
-    rate=FloatField()
-    delivery_days=IntField()
-    rate_data=DictField()
-    created_at=DateTimeField(default=datetime.now)
-    shipment_type = StringField(choices=['combined', 'split'])  
-    item_sku = StringField() 
+    order = ReferenceField(Order)
+    carrier = StringField()
+    service = StringField()
+    rate = FloatField()
+    delivery_days = IntField()
+    rate_data = DictField()
+    created_at = DateTimeField(default=datetime.now)
+    shipment_type = StringField(choices=["combined", "split"])
+    item_sku = StringField()
+
+
 class product_details(EmbeddedDocument):
     product_id = ReferenceField(Product)
     title = StringField(required=True)
@@ -357,11 +465,15 @@ class product_details(EmbeddedDocument):
     unit_price = FloatField(default=0.0)
     quantity = IntField()
     quantity_price = FloatField(default=0.0)
+
+
 class custom_order(Document):
     # Order details
     order_id = StringField()  # Internal order ID
     customer_order_id = StringField()  # ID from the customer's perspective for tracking
-    ordered_products = ListField(EmbeddedDocumentField(product_details))  # List of product names
+    ordered_products = ListField(
+        EmbeddedDocumentField(product_details)
+    )  # List of product names
     total_quantity = IntField()
     total_price = FloatField(default=0.0)
     currency = StringField()
@@ -369,11 +481,13 @@ class custom_order(Document):
     channel = StringField()  # e.g., "Amazon", "Shopify"
     order_status = StringField(default="Pending")
     # Add these fields to Order model
-    multiple_shipments = BooleanField(default=False)  # Used in update_shipstation_status
+    multiple_shipments = BooleanField(
+        default=False
+    )  # Used in update_shipstation_status
     shipments = ListField(DictField())  # Used to store shipment details
-    shipment_type = StringField(choices=['combined', 'split'])  # How items were shipped
+    shipment_type = StringField(choices=["combined", "split"])  # How items were shipped
     shipping_options = DictField()  # Stores combined/split shipping options
-    recommended_shipping = StringField(choices=['combined', 'split'])     
+    recommended_shipping = StringField(choices=["combined", "split"])
     # Payment details
     payment_status = StringField(default="Pending")  # e.g., "Paid", "Pending"
     payment_mode = StringField()  # e.g., "Credit Card", "PayPal"
@@ -390,7 +504,7 @@ class custom_order(Document):
     mail = StringField()
     contact_number = StringField()
     customer_note = StringField()  # Any note provided by the customer
-    tags= StringField()
+    tags = StringField()
     # Shipping details
     package_dimensions = StringField()  # e.g., "10x5x3 inches"
     weight = FloatField(default=0.0)  # Weight of package
@@ -414,6 +528,7 @@ class custom_order(Document):
     updated_at = DateTimeField(default=datetime.now())
     user_id = ReferenceField(user)
 
+
 # class EndPointCache(Document):
 #     cache_key=StringField(required=True,unique=True,max_length=200)
 #     endpoint_name=StringField(required=True,max_length=200)
@@ -432,63 +547,71 @@ class custom_order(Document):
 #         'indexes': [
 #             {'fields': ['cache_key'], 'unique': True},
 #             {'fields': ['endpoint_name', 'expires_at']},
-            
-#             {'fields': ['expires_at']}, 
+
+#             {'fields': ['expires_at']},
 #             {'fields': ['created_at']},
 #             {'fields': ['last_accessed']},
-            
+
 #             {'fields': ['endpoint_name', 'hit_count']},
 #             {'fields': ['user_id', 'endpoint_name']},
 #             {'fields': ['marketplace_id', 'endpoint_name']},
-            
+
 #             {'fields': ['endpoint_name', 'parameters_hash']},
 #             {'fields': ['is_popular', 'hit_count']},
-            
+
 #             {'fields': ['expires_at'], 'expireAfterSeconds': 0}
 #         ]
 #     }
 
+
 class CacheConfiguration(Document):
-    endpoint_name=StringField(required=True,unique=True,max_length=100)
-    ttl_minutes=IntField(default=30)
-    max_entries=IntField(default=1000)
-    user_specific=BooleanField(default=False)
-    date_sensitive=BooleanField(default=True)
-    exclude_params=ListField(StringField(max_length=50),default=[])
-    sensitive_params=ListField(StringField(max_length=50),default=[])
-    created_at=DateTimeField(default=datetime.utcnow)
-    updated_at=DateTimeField(default=datetime.utcnow)
-    is_active=BooleanField(detault=True)
-    meta={
-        "collection":'cache_configuration',
-        'indexes':[
-            {'fields':['endpoint_name'],"unique":True},
-            {'fields':['is_active']}
-        ]
+    endpoint_name = StringField(required=True, unique=True, max_length=100)
+    ttl_minutes = IntField(default=30)
+    max_entries = IntField(default=1000)
+    user_specific = BooleanField(default=False)
+    date_sensitive = BooleanField(default=True)
+    exclude_params = ListField(StringField(max_length=50), default=[])
+    sensitive_params = ListField(StringField(max_length=50), default=[])
+    created_at = DateTimeField(default=datetime.utcnow)
+    updated_at = DateTimeField(default=datetime.utcnow)
+    is_active = BooleanField(detault=True)
+    meta = {
+        "collection": "cache_configuration",
+        "indexes": [
+            {"fields": ["endpoint_name"], "unique": True},
+            {"fields": ["is_active"]},
+        ],
     }
 
+
 class SyncStatus(Document):
-    task_name=StringField(required=True,unique=True,max_length=50)
-    status=StringField(choices=['running','completed','failed','pending'],default='pending')
-    last_run=DateTimeField(default=datetime.utcnow)
-    last_success=DateTimeField()
-    run_count=IntField(default=0)
-    success_count=IntField(default=0)
-    failure_count=IntField(default=0)
-    error_message=StringField(max_length=1000)
-    affected_endpoints=ListField(StringField(max_length=100))
-    meta={
-        'collection':"sync_status",
-        "indexes":[
-            {"fields":['task_name'],"unique":True},
-            {'fields':['status']},
-            {'fields':['last_success']}
-        ]   
+    task_name = StringField(required=True, unique=True, max_length=50)
+    status = StringField(
+        choices=["running", "completed", "failed", "pending"], default="pending"
+    )
+    last_run = DateTimeField(default=datetime.utcnow)
+    last_success = DateTimeField()
+    run_count = IntField(default=0)
+    success_count = IntField(default=0)
+    failure_count = IntField(default=0)
+    error_message = StringField(max_length=1000)
+    affected_endpoints = ListField(StringField(max_length=100))
+    meta = {
+        "collection": "sync_status",
+        "indexes": [
+            {"fields": ["task_name"], "unique": True},
+            {"fields": ["status"]},
+            {"fields": ["last_success"]},
+        ],
     }
+
+
 class authenticated_api(Document):
     name = StringField()
     created_at = DateTimeField()
     allowed_roles = ListField(ReferenceField(role))
+
+
 class CityDetails(Document):
     city = StringField(max_length=100)
     city_ascii = StringField(max_length=100)
@@ -505,38 +628,48 @@ class CityDetails(Document):
     incorporated = BooleanField()
     timezone = StringField(max_length=100)
     ranking = IntField()
-    zips = StringField()  
+    zips = StringField()
     uid = IntField(unique=True)
+
+
 class chooseMatrix(Document):
     name = StringField(max_length=100)
-    select_all =  BooleanField()
-    gross_revenue =  BooleanField()
-    units_sold =  BooleanField()
-    acos =  BooleanField()
-    tacos =  BooleanField()
-    refund_quantity =  BooleanField()
-    net_profit =  BooleanField()
-    profit_margin =  BooleanField()
-    refund_amount =  BooleanField()
-    roas =  BooleanField()
-    orders =  BooleanField()
-    ppc_spend =  BooleanField()
+    select_all = BooleanField()
+    gross_revenue = BooleanField()
+    units_sold = BooleanField()
+    acos = BooleanField()
+    tacos = BooleanField()
+    refund_quantity = BooleanField()
+    net_profit = BooleanField()
+    profit_margin = BooleanField()
+    refund_amount = BooleanField()
+    roas = BooleanField()
+    orders = BooleanField()
+    ppc_spend = BooleanField()
     total_cogs = BooleanField()
     business_value = BooleanField()
+
+
 class notes_data(Document):
     product_id = ReferenceField(Product)
     date_f = DateTimeField(default=datetime.now())
     notes = StringField()
     user_id = ReferenceField(user)
+
+
 class Fee(Document):
     marketplace = StringField()
     fee_type = StringField()
     amount = FloatField(default=0.0)
-    date =  DateTimeField(default=datetime.now())
+    date = DateTimeField(default=datetime.now())
+
+
 class Refund(Document):
     product_id = ReferenceField(Product)
-    date =  DateTimeField(default=datetime.now())
-    reason  = StringField()
+    date = DateTimeField(default=datetime.now())
+    reason = StringField()
+
+
 class pageview_session_count(Document):
     product_id = ListField(ReferenceField(Product), default=[])
     date = DateTimeField(default=datetime.now())
@@ -582,19 +715,23 @@ class pageview_session_count(Document):
     unit_session_percentage = FloatField(default=0.0)
     unit_session_percentage_b2b = FloatField(default=0.0)
     meta = {
-        'indexes': [
-            'product_id',
-            'date',
-            ['date', 'product_id'],
-            ['product_id', 'date']  # Compound index for range queries
+        "indexes": [
+            "product_id",
+            "date",
+            ["date", "product_id"],
+            ["product_id", "date"],  # Compound index for range queries
         ]
     }
+
+
 class inventry_log(Document):
     date = DateTimeField(default=datetime.now())
     product_id = ReferenceField(Product)
     available = IntField(default=0)
     reserved = IntField(default=0)
     updated_at = DateTimeField(default=datetime.now())
+
+
 class productPriceChange(Document):
     product_id = ReferenceField(Product)
     old_price = FloatField(default=0.0)
