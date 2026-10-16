@@ -197,7 +197,7 @@ def getproductIdListBasedonManufacture(manufactureName = [],start_date=None, end
 
 
 USE_REFERENCE_DATE = True
-REFERENCE_DATE = "05/09/2026" 
+REFERENCE_DATE = "05/09/2026"
 
 
 def get_date_range(

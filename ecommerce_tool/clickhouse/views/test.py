@@ -11,6 +11,7 @@ from django.views.decorators.csrf import csrf_exempt
 from clickhouse.config import client
 
 
+# to take backup of a table
 @csrf_exempt
 def clickhouse_test_url(request):
     """Only creates a full backup table of fact_order_items"""
@@ -34,6 +35,42 @@ def clickhouse_test_url(request):
 
     except Exception as e:
         return JsonResponse({"status": False, "message": str(e)}, status=500)
+
+
+@csrf_exempt
+def clickhouse_test_url(request):
+    """Get minimum and maximum order dates from fact_order_items."""
+
+    try:
+        result = client.query("""
+            SELECT
+                MIN(order_date) AS min_order_date,
+                MAX(order_date) AS max_order_date
+            FROM daas.fact_order_items
+        """)
+
+        min_order_date, max_order_date = result.result_rows[0]
+
+        return JsonResponse(
+            {
+                "status": True,
+                "min_order_date": (
+                    str(min_order_date) if min_order_date is not None else None
+                ),
+                "max_order_date": (
+                    str(max_order_date) if max_order_date is not None else None
+                ),
+            }
+        )
+
+    except Exception as e:
+        return JsonResponse(
+            {
+                "status": False,
+                "message": str(e),
+            },
+            status=500,
+        )
 
 
 @csrf_exempt
